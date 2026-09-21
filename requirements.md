@@ -1,0 +1,1010 @@
+# AgentGuard V0 Requirements
+
+## 1. Product Objective
+
+AgentGuard is a local-first developer tool that identifies potentially important AI-agent behaviors that are not adequately represented in the agent's existing eval or regression-test suite.
+
+The primary V0 question is:
+
+> What important behaviors in this agent appear insufficiently tested?
+
+V0 exists to validate whether AgentGuard can find gaps that engineers consider useful enough to act on.
+
+The core product hypothesis is:
+
+> If AgentGuard identifies a credible missing eval, an engineer will add or modify a test because of that finding.
+
+---
+
+## 2. Target User
+
+The primary V0 user is an AI or agent engineer responsible for an agent that already has an eval or regression-test suite.
+
+The user may have:
+
+- prompts
+- tool definitions
+- workflow definitions
+- pytest tests
+- JSONL eval datasets
+
+The user should not need to create a new capability taxonomy, policy system, requirements database, or governance process before using AgentGuard.
+
+---
+
+## 3. Primary User Workflow
+
+A user should eventually be able to run:
+
+```bash
+agentguard scan <repository-path>
+```
+
+AgentGuard should:
+
+1. inspect the repository
+2. discover supported agent artifacts
+3. extract candidate agent behaviors
+4. discover existing eval scenarios
+5. map behaviors to existing evals
+6. classify behaviors as:
+   - covered
+   - partially covered
+   - potentially uncovered
+7. explain why each finding was produced
+8. suggest a missing eval scenario where appropriate
+9. assign stable IDs to behaviors and findings
+10. preserve user feedback across future scans
+11. detect when a new or modified eval appears to resolve a previous finding
+
+---
+
+## 4. Supported V0 Inputs
+
+V0 should support:
+
+- Python source code
+- prompt strings discoverable in supported Python source
+- supported standalone prompt files
+- agent tool definitions
+- agent/workflow definitions
+- LangGraph workflows where practical
+- pytest-based tests/evals
+- supported JSONL eval datasets
+- optional AgentGuard configuration
+
+V0 does not require:
+
+- production traces
+- cloud integrations
+- Jira
+- Confluence
+- Slack
+- governance systems
+- policy repositories
+- hosted storage
+
+---
+
+## 5. Initial Supported Prompt Formats
+
+V0 should initially support prompt discovery from:
+
+- Python string literals assigned to clearly identifiable prompt variables
+- Python strings passed directly into supported agent/model constructors where statically discoverable
+- `.txt` prompt files
+- `.md` prompt files
+
+Prompt extraction should remain static.
+
+AgentGuard must not execute target repository code in order to discover prompts.
+
+Unsupported or ambiguous prompt formats should be reported as unsupported rather than guessed.
+
+Additional prompt formats may be added later.
+
+---
+
+## 6. Initial Supported JSONL Eval Format
+
+V0 should support a minimal documented JSONL format.
+
+Each line should be a valid JSON object.
+
+AgentGuard should initially recognize these fields when present:
+
+```json
+{
+  "input": "user input or scenario",
+  "expected": "expected response or behavior",
+  "metadata": {
+    "name": "optional eval name",
+    "tools": ["optional", "tool", "names"],
+    "tags": ["optional", "tags"]
+  }
+}
+```
+
+Required:
+
+- `input`
+
+Optional:
+
+- `expected`
+- `metadata`
+- `metadata.name`
+- `metadata.tools`
+- `metadata.tags`
+
+If `expected` is absent, AgentGuard may still discover the scenario but must not assume the expected outcome has been verified.
+
+Unknown fields should be preserved where practical but ignored for V0 matching unless explicitly supported.
+
+Malformed JSONL records should produce a scan warning and should not crash the entire scan.
+
+---
+
+## 7. Behavior Representation
+
+Each extracted behavior should contain at minimum:
+
+- behavior ID
+- human-readable description
+- behavior type
+- source file
+- source symbol where available
+- source evidence
+- extractor that produced it
+
+Potential behavior types may include:
+
+- tool invocation
+- tool failure
+- conditional behavior
+- workflow branch
+- fallback behavior
+- escalation
+- prohibited action
+- required action
+
+Examples:
+
+- a tool can be invoked
+- a tool can fail with a specific exception
+- a workflow can follow a conditional branch
+- a prompt requires escalation above a threshold
+- an agent must avoid taking an action if authentication fails
+
+---
+
+## 8. Eval Representation
+
+Each discovered eval should contain at minimum:
+
+- eval ID
+- test/eval name
+- source file
+- source symbol where available
+- scenario description where inferable
+- assertions or expected outcomes where inferable
+- tools or behaviors referenced where inferable
+
+AgentGuard should distinguish between:
+
+- an eval that merely mentions or invokes a behavior
+- an eval that actually verifies the expected outcome
+
+---
+
+## 9. Coverage States
+
+V0 supports three coverage states.
+
+### Covered
+
+A behavior may be marked `covered` only when AgentGuard has evidence that at least one existing eval:
+
+1. materially exercises the behavior or relevant condition, and
+2. verifies the expected outcome or invariant.
+
+Examples of acceptable evidence may include:
+
+- a pytest test invokes the relevant tool/branch and asserts the expected result
+- a test explicitly verifies the expected exception/fallback/escalation
+- a JSONL eval contains the relevant scenario and an expected outcome that corresponds to the behavior
+
+Merely:
+
+- mentioning the same tool
+- referencing the same function
+- exercising a neighboring branch
+- using similar keywords
+
+is not sufficient to mark a behavior as covered.
+
+When evidence is ambiguous, prefer `partially_covered` or `potentially_uncovered`.
+
+### Partially Covered
+
+A behavior is `partially_covered` when an eval exercises the relevant functionality but does not fully verify an important condition, branch, failure mode, or expected outcome.
+
+Example:
+
+- the refund tool is tested successfully
+- timeout behavior for the same tool is not tested
+
+### Potentially Uncovered
+
+A behavior is `potentially_uncovered` when AgentGuard finds no eval that appears to materially exercise and verify the behavior.
+
+AgentGuard must avoid implying certainty.
+
+Use language such as:
+
+> Potentially uncovered
+
+rather than:
+
+> Definitely untested
+
+unless a deterministic rule genuinely establishes that conclusion.
+
+---
+
+## 10. No Numeric Behavioral Coverage Percentage in V0
+
+V0 must not present a numeric behavioral coverage percentage such as:
+
+> 82% covered
+
+The denominator for agent behavioral coverage is not yet trustworthy enough to support that claim.
+
+V0 should instead present:
+
+- identified behaviors
+- matched evals
+- partially covered behaviors
+- potentially uncovered behaviors
+- confidence and evidence
+
+---
+
+## 11. Findings
+
+Each finding should contain:
+
+- stable finding ID
+- associated behavior ID
+- coverage status
+- confidence
+- supporting evidence
+- matched eval IDs
+- explanation
+- suggested missing scenario, if applicable
+
+Every actionable finding should answer:
+
+- what behavior was detected
+- where it came from
+- what existing evals were considered
+- why AgentGuard believes coverage may be incomplete
+- what additional scenario may close the gap
+
+---
+
+## 12. Static Analysis and Execution Safety
+
+AgentGuard must not import or execute code from the target repository during scanning.
+
+Scanning must be based on static analysis.
+
+AgentGuard must not:
+
+- import target repository modules
+- execute target repository tests
+- invoke target repository functions
+- run arbitrary scripts from the target repository
+- make network calls on behalf of scanned code
+- access target application credentials by executing repository code
+
+This requirement exists to avoid:
+
+- side effects
+- dependency conflicts
+- unintended API calls
+- credential exposure
+- malicious code execution
+- non-reproducible scanning behavior
+
+AgentGuard may inspect source files, syntax trees, configuration files, and supported static metadata.
+
+If a behavior cannot be determined without executing the target repository, V0 should report that limitation rather than execute the code.
+
+---
+
+## 13. Feedback Loop
+
+Feedback and resolution tracking are mandatory V0 features.
+
+Every actionable finding should support these dispositions:
+
+- `add_eval`
+- `valid_later`
+- `already_covered`
+- `not_relevant`
+- `suppressed`
+
+Feedback must persist locally across scans.
+
+A future scan should attempt to determine whether a new or modified eval appears to resolve a previously open finding.
+
+---
+
+## 14. Feedback Meaning
+
+### add_eval
+
+The user indicates that the finding is valid and intends to add or modify an eval.
+
+### valid_later
+
+The user agrees the gap is valid but does not intend to address it immediately.
+
+### already_covered
+
+The user believes the behavior is already adequately tested and AgentGuard failed to detect the coverage correctly.
+
+This should be treated as an important false-positive/matching-quality signal.
+
+### not_relevant
+
+The user believes the detected behavior does not require coverage or is not relevant to their testing strategy.
+
+### suppressed
+
+The user does not want AgentGuard to continue surfacing this finding.
+
+Suppression does not necessarily mean the finding was incorrect.
+
+---
+
+## 15. Observed Resolution vs Confirmed Product Impact
+
+AgentGuard must distinguish between two different concepts.
+
+### Observed Test Resolution
+
+AgentGuard detects that a new or modified eval now appears to adequately cover a previously open finding.
+
+Example:
+
+```text
+Finding AG-123:
+payment lookup timeout appears untested
+
+Later scan:
+tests/test_payment.py::test_payment_timeout now matches the behavior
+```
+
+This may be recorded as:
+
+> Observed resolution
+
+AgentGuard must not assume that the engineer created the test because of AgentGuard.
+
+### User-Confirmed Impact
+
+The user explicitly confirms that an AgentGuard finding caused them to add or modify an eval.
+
+Examples:
+
+- selecting `add_eval`
+- accepting a suggested eval
+- confirming after resolution that the finding caused the test change
+
+This may be recorded as:
+
+> Confirmed product impact
+
+Observed resolution and confirmed impact must remain separate metrics.
+
+---
+
+## 16. Feedback Metric Definitions
+
+V0 should support calculating the following metrics.
+
+### Valid Gap Rate
+
+Measures whether engineers agree that surfaced gaps are genuine.
+
+Eligible reviewed findings:
+
+- `add_eval`
+- `valid_later`
+- `already_covered`
+- `not_relevant`
+
+Suggested definition:
+
+```text
+add_eval + valid_later
+----------------------
+eligible reviewed findings
+```
+
+`suppressed` should not automatically be counted as valid or invalid unless the user also supplies a reason.
+
+### Actionable Gap Rate
+
+Measures whether findings cause engineers to act.
+
+Primary confirmed version:
+
+```text
+findings explicitly confirmed as causing an eval change
+--------------------------------------------------------
+eligible high-confidence findings reviewed
+```
+
+A separate observed metric may track:
+
+```text
+findings followed by detected eval resolution
+---------------------------------------------
+eligible findings
+```
+
+These two metrics must not be conflated.
+
+### False Positive Rate
+
+Suggested definition:
+
+```text
+already_covered + clearly incorrect findings
+---------------------------------------------
+eligible reviewed findings
+```
+
+`not_relevant` should not automatically count as a false positive because the detected behavior may be real even if the user does not consider it worth testing.
+
+### Resolved-by-Test Rate
+
+Measures whether previously open findings later become covered.
+
+```text
+open findings later resolved by new/modified eval
+-------------------------------------------------
+eligible previously open findings
+```
+
+The product should preserve enough history to calculate these metrics consistently.
+
+---
+
+## 17. Stable Behavior IDs
+
+Behavior IDs should remain stable across:
+
+- whitespace changes
+- formatting changes
+- line-number movement
+- non-semantic changes around the behavior
+
+Line numbers must not be the primary basis for identity.
+
+Behavior identity should instead use stable semantic or structural attributes where possible, such as:
+
+- normalized behavior type
+- symbol identity
+- tool/workflow identity
+- normalized condition
+- normalized expected action/outcome
+
+---
+
+## 18. Rename and Move Limitations
+
+V0 should make a best-effort attempt to preserve stable IDs when code is moved or renamed.
+
+However, V0 does not guarantee identity preservation across:
+
+- file renames
+- symbol renames
+- function moves between modules
+- major workflow restructuring
+- substantial prompt rewrites
+
+If AgentGuard cannot confidently determine that a moved or renamed behavior is the same logical behavior, it may:
+
+- create a new behavior ID
+- mark the previous finding as no longer observed
+- avoid claiming that the previous issue has been resolved
+
+This limitation should be documented.
+
+A later version may support stronger rename/move tracking using repository history.
+
+---
+
+## 19. Stable Finding IDs
+
+Finding IDs should derive from the underlying behavior and finding type rather than:
+
+- line number
+- scan timestamp
+- arbitrary ordering
+
+A finding should normally retain the same ID across repeated scans when the underlying behavior and coverage concern are materially unchanged.
+
+A materially changed behavior may generate a new finding ID.
+
+---
+
+## 20. Incomplete Scan Handling
+
+AgentGuard must distinguish between:
+
+- a successful complete scan
+- a successful but incomplete scan
+- a failed scan
+
+A scan may be incomplete because:
+
+- files could not be parsed
+- unsupported syntax was encountered
+- an extractor failed
+- an expected artifact format was unsupported
+- part of the repository was inaccessible
+- scan limits were reached
+
+When a scan is incomplete:
+
+1. AgentGuard must surface warnings describing what was not analyzed.
+2. AgentGuard must not silently treat missing analysis as proof of missing eval coverage.
+3. Findings dependent on unavailable evidence should be:
+   - withheld, or
+   - marked inconclusive/low-confidence.
+4. Previously known findings must not automatically be marked resolved merely because the behavior was not observed in an incomplete scan.
+5. Historical state should be preserved.
+6. Metrics should exclude findings whose status cannot be confidently determined because of scan incompleteness.
+
+The product should prefer:
+
+> Unable to determine coverage because part of the repository could not be analyzed.
+
+over:
+
+> Potentially uncovered
+
+when the required evidence was unavailable.
+
+---
+
+## 21. Explainability Requirements
+
+For every partially covered or potentially uncovered behavior, AgentGuard should show:
+
+- what behavior was detected
+- the source artifact
+- the relevant file and symbol
+- relevant source evidence
+- what existing evals were considered
+- why those evals were insufficient
+- the confidence level
+- what additional eval scenario may be useful
+
+AgentGuard should favor evidence over opaque scores.
+
+---
+
+## 22. Confidence
+
+V0 may use qualitative confidence levels:
+
+- high
+- medium
+- low
+
+Confidence should represent confidence in the finding or match, not a probability that the agent is safe or correct.
+
+Examples:
+
+### High confidence
+
+A deterministic tool failure exists and no discovered eval references or verifies that failure mode.
+
+### Medium confidence
+
+A semantic match suggests neighboring behavior is tested but the exact condition may not be.
+
+### Low confidence
+
+The behavior was inferred from ambiguous natural-language prompt text.
+
+Low-confidence findings should not dominate the default output.
+
+---
+
+## 23. Local Persistence
+
+V0 should store local AgentGuard state under:
+
+```text
+.agentguard/
+```
+
+Persistence may initially use:
+
+- JSON, or
+- SQLite
+
+The persistence layer should support at minimum:
+
+- finding history
+- feedback dispositions
+- first-seen timestamp
+- last-seen timestamp
+- open/resolved state
+- observed resolution
+- user-confirmed impact where available
+
+No hosted backend is required.
+
+---
+
+## 24. CLI Requirements
+
+At minimum, V0 should eventually support:
+
+```bash
+agentguard scan <path>
+agentguard findings
+agentguard feedback <finding-id> <disposition>
+```
+
+The exact syntax may evolve during implementation.
+
+Commands should return clear errors for:
+
+- nonexistent paths
+- unsupported repositories
+- malformed configuration
+- malformed JSONL
+- incomplete scans
+
+---
+
+## 25. Quality Requirements
+
+The scanner should prioritize precision over recall.
+
+It is better to surface:
+
+> 5 findings that engineers agree are useful
+
+than:
+
+> 50 speculative findings
+
+Every major capability must have automated tests.
+
+Important test cases include:
+
+1. behavior with matching eval
+2. behavior with no matching eval
+3. partially covered behavior
+4. multiple evals matching one behavior
+5. one eval covering multiple behaviors
+6. suppressed finding
+7. finding marked already covered
+8. stable ID across whitespace changes
+9. stable ID across line movement
+10. new eval resolving a prior finding
+11. incomplete scan does not falsely resolve findings
+12. unsupported file does not crash the scan
+13. repository code is never imported or executed during scan
+14. JSONL scenario without expected output does not count as verified coverage
+15. user-confirmed impact remains separate from observed resolution
+
+---
+
+## 26. V0 Validation Criteria
+
+Before progressing to V1, we want evidence that:
+
+- at least 20 real users or repositories have been evaluated
+- at least 70% of reviewed high-confidence findings are considered valid
+- at least 30% of eligible high-confidence findings cause an eval to be added or modified
+- false-positive rate is below approximately 20–25%
+- users perform repeat scans
+- there are concrete examples of:
+
+```text
+finding
+→ engineer agrees it is valid
+→ eval added or modified
+→ finding later resolved
+```
+
+The strongest validation signal is:
+
+> An engineer added or changed an eval because AgentGuard found a gap they did not already know about.
+
+GitHub stars, installs, and downloads are useful secondary metrics but are not sufficient V0 validation.
+
+---
+
+## 27. Out of Scope for V0
+
+Do not build:
+
+- cloud dashboard
+- production trace ingestion
+- production monitoring
+- GitHub Actions integration
+- GitHub PR comments
+- release gating
+- agent certification
+- enterprise governance workflows
+- policy-management platform
+- Jira integration
+- Confluence integration
+- Slack integration
+- SSO
+- RBAC
+- multi-tenant SaaS backend
+- enterprise audit platform
+- enterprise agent inventory
+- VPC deployment
+- numeric behavioral coverage score
+
+Planned progression:
+
+- GitHub Actions / CI integration: V1
+- change-aware coverage: V1.5
+- production-informed coverage: V2
+- credible coverage intelligence: V2.5
+- release assurance: V3
+- requirements/policy traceability: V4
+- enterprise agent assurance: V5
+
+---
+
+## 28. V0 Product Principles
+
+### Precision over recall
+
+Do not maximize the number of findings.
+
+Maximize the number of findings engineers consider genuinely useful.
+
+### Evidence over scoring
+
+Every important conclusion should have inspectable evidence.
+
+### Static and safe by default
+
+Scanning must not execute untrusted repository code.
+
+### Local first
+
+The core V0 experience should work locally without a hosted backend.
+
+### Developer workflow first
+
+AgentGuard should feel like an engineering tool, not a compliance platform.
+
+### Low setup
+
+Users should receive useful results from artifacts already present in their repository.
+
+### No false assurance
+
+AgentGuard identifies potential missing eval coverage.
+
+It does not certify that an agent is:
+
+- safe
+- correct
+- compliant
+- production-ready
+- fully tested
+
+### Product impact must be measurable
+
+AgentGuard should distinguish between:
+
+- finding something
+- a user agreeing it is valid
+- a test later appearing
+- the user confirming AgentGuard caused the test change
+
+Those are different signals and should remain separate.
+
+## Metric and Impact Clarifications
+
+### add_eval
+
+`add_eval` represents user intent to add or modify an eval.
+
+It does not by itself count as confirmed product impact.
+
+### observed_resolution
+
+`observed_resolution` is recorded when a later scan detects that a new or
+modified eval now appears to cover the finding.
+
+Observed resolution does not prove AgentGuard caused the change.
+
+### confirmed_impact
+
+`confirmed_impact` requires explicit user confirmation that the AgentGuard
+finding caused or materially influenced the eval change.
+
+### Finding Counting
+
+Metrics count unique stable finding IDs, not repeated scan appearances.
+
+### Review Eligibility
+
+A finding is considered reviewed when the user selects:
+
+- add_eval
+- valid_later
+- already_covered
+- not_relevant
+
+Suppression alone is not a reviewed outcome unless a reason is also recorded.
+
+### Confidence Cohort
+
+Metric eligibility uses the finding confidence at the time of first review.
+
+### Reopened Findings
+
+A reopened finding retains its original finding ID and is not counted as a new
+finding. Reopen events should be tracked separately.
+
+### Revised Feedback
+
+The latest user disposition is the current state, but all prior feedback events
+must remain in history.
+
+### False Positive Signal
+
+`already_covered` is the primary V0 false-positive signal.
+
+`not_relevant` does not automatically count as a false positive.
+
+## Metric Definitions
+
+Metrics are calculated over unique stable `finding_id` values, not scan appearances.
+
+A finding is considered `reviewed` when the latest explicit user disposition is one of:
+
+- `add_eval`
+- `valid_later`
+- `already_covered`
+- `not_relevant`
+
+A `suppressed` finding is excluded from reviewed cohorts unless it also has an explicit review reason.
+
+Findings whose assessment was unavailable because of an incomplete or failed scan are excluded from metric denominators until they become assessable.
+
+Confidence eligibility is determined using the finding confidence at the time of first review.
+
+Reopened findings retain the same finding ID and are not counted as new findings.
+
+### Valid Gap Rate
+
+Measures whether reviewed findings are considered genuine gaps by users.
+
+Numerator:
+
+- `add_eval`
+- `valid_later`
+
+Denominator:
+
+- all eligible reviewed findings
+
+Formula:
+
+Valid Gap Rate =
+(`add_eval` + `valid_later`) / eligible reviewed findings
+
+### Intent-to-Act Rate
+
+Measures whether users intend to change their eval suite because of a finding.
+
+Numerator:
+
+- findings with current disposition `add_eval`
+
+Denominator:
+
+- eligible reviewed findings
+
+Formula:
+
+Intent-to-Act Rate =
+`add_eval` / eligible reviewed findings
+
+`add_eval` represents intent only and must not be interpreted as confirmed product impact.
+
+### Observed Resolution Rate
+
+Measures whether previously open findings later appear to become covered by a new or modified eval.
+
+Numerator:
+
+- eligible findings with `observed_resolution = true`
+
+Denominator:
+
+- eligible previously open findings that have had at least one subsequent complete scan
+
+Formula:
+
+Observed Resolution Rate =
+observed resolutions / eligible previously open findings with follow-up scans
+
+Observed resolution does not establish that AgentGuard caused the eval change.
+
+### Confirmed Impact Rate
+
+Measures whether users explicitly confirm that AgentGuard caused or materially influenced an eval addition or modification.
+
+Numerator:
+
+- eligible findings with explicit `confirmed_impact = true`
+
+Denominator:
+
+- eligible reviewed high-confidence findings
+
+Formula:
+
+Confirmed Impact Rate =
+confirmed-impact findings / eligible reviewed high-confidence findings
+
+Confirmed impact must require an explicit user confirmation event.
+
+### False Positive Rate
+
+Measures findings where the user indicates that adequate coverage already existed and AgentGuard failed to identify it.
+
+Numerator:
+
+- findings whose current disposition is `already_covered`
+
+Denominator:
+
+- eligible reviewed findings
+
+Formula:
+
+False Positive Rate =
+`already_covered` / eligible reviewed findings
+
+`not_relevant` must not automatically count as a false positive.
+
+### Resolved-by-Test Rate
+
+Measures whether open findings later become covered by a new or modified eval.
+
+Numerator:
+
+- findings with observed test resolution
+
+Denominator:
+
+- eligible findings that were previously open and have had at least one subsequent complete scan
+
+Formula:
+
+Resolved-by-Test Rate =
+findings resolved by test / eligible previously open findings with follow-up scans
