@@ -1,0 +1,72 @@
+
+This is somewhat detailed, but that's intentional for the beginning. OpenAI's current Codex guidance supports using `AGENTS.md` as persistent project context, although as the repo becomes larger you can move detailed architecture/product documentation into `docs/` and keep `AGENTS.md` as a shorter index. citeturn739767search2turn739767search3
+
+---
+
+## `.gitignore`
+
+```gitignore
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type checking / linting
+.mypy_cache/
+.ruff_cache/
+.pyright/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# API keys / credentials
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# AgentGuard local state
+.agentguard/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
