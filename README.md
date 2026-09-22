@@ -8,7 +8,43 @@ from the existing eval or regression-test suite.
 
 ## Status
 
-AgentGuard is currently pre-alpha and under active development.
+AgentGuard is currently pre-alpha and under active development. The current
+milestone provides the CLI and typed configuration foundation. Repository
+scanning and findings are not implemented yet.
+
+## Installation
+
+AgentGuard requires Python 3.12 or newer. To install the project for local
+development:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+The installed CLI currently supports help and version output:
+
+```bash
+agentguard --help
+agentguard --version
+```
+
+Running `agentguard` without arguments also displays help. Scan, findings, and
+feedback commands will be added in later milestones.
+
+## Configuration
+
+Future repository commands will read an optional `agentguard.toml` from the
+repository root. The configuration loader validates it without importing or
+executing repository code.
+
+```toml
+include = ["**/*.py", "**/*.txt", "**/*.md", "**/*.jsonl"]
+exclude = [".git/**", ".agentguard/**", ".venv/**", "venv/**"]
+```
+
+When the file is absent, AgentGuard uses defaults covering Python, text,
+Markdown, and JSONL artifacts while excluding common generated and local-state
+directories. Unknown settings and invalid field types are rejected.
 
 ## V0 Goal
 
@@ -32,3 +68,12 @@ AgentGuard does not attempt to certify that an agent is safe or production-ready
 Its initial job is much narrower:
 
 > Help engineers discover important behaviors they may not be testing.
+
+## Development checks
+
+```bash
+pytest
+ruff check .
+ruff format --check .
+mypy src/agentguard
+```
