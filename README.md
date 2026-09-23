@@ -21,25 +21,27 @@ development:
 python -m pip install -e ".[dev]"
 ```
 
-The installed CLI currently supports help and version output:
+The installed CLI supports repository artifact discovery, help, and version
+output:
 
 ```bash
 agentguard --help
 agentguard --version
+agentguard scan path/to/repository
 ```
 
-Running `agentguard` without arguments also displays help. Scan, findings, and
-feedback commands will be added in later milestones.
+Running `agentguard` without arguments also displays help. Behavior extraction,
+findings, and feedback commands will be added in later milestones.
 
 ## Configuration
 
-Future repository commands will read an optional `agentguard.toml` from the
-repository root. The configuration loader validates it without importing or
-executing repository code.
+The scan command reads an optional `agentguard.toml` from the repository root.
+The configuration loader validates it without importing or executing repository
+code.
 
 ```toml
 include = ["**/*.py", "**/*.txt", "**/*.md", "**/*.jsonl"]
-exclude = [".git/**", ".agentguard/**", ".venv/**", "venv/**"]
+exclude = ["**/.git/**", "**/.venv/**", "**/node_modules/**"]
 ```
 
 When the file is absent, AgentGuard uses defaults covering Python, text,

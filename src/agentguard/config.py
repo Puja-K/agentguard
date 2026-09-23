@@ -15,13 +15,14 @@ DEFAULT_INCLUDE = (
 )
 
 DEFAULT_EXCLUDE = (
-    ".git/**",
-    ".agentguard/**",
-    ".venv/**",
-    "venv/**",
+    "**/.git/**",
+    "**/.agentguard/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/node_modules/**",
     "**/__pycache__/**",
-    "build/**",
-    "dist/**",
+    "**/build/**",
+    "**/dist/**",
 )
 
 
