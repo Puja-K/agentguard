@@ -8,7 +8,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from agentguard.models import ArtifactType, ScanCompleteness, ScanResult
+from agentguard.extractors import parse_eval_artifacts
+from agentguard.models import (
+    ArtifactType,
+    EvalParseResult,
+    EvalSourceType,
+    ScanCompleteness,
+    ScanResult,
+)
 from agentguard.scanners import scan_repository
 
 PACKAGE_NAME = "agentguard"
@@ -33,11 +40,12 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-def _render_scan_result(result: ScanResult) -> None:
-    output = error_console if result.completeness is ScanCompleteness.FAILED else console
+def _render_scan_result(result: ScanResult, eval_result: EvalParseResult | None = None) -> None:
+    completeness = eval_result.completeness if eval_result is not None else result.completeness
+    output = error_console if completeness is ScanCompleteness.FAILED else console
     repository = result.repository.root or result.repository.requested_path
     output.print(f"Repository: {repository}", soft_wrap=True, markup=False)
-    output.print(f"Status: {result.completeness.value}", markup=False)
+    output.print(f"Status: {completeness.value}", markup=False)
 
     if result.completeness is not ScanCompleteness.FAILED:
         counts = {artifact_type: 0 for artifact_type in ArtifactType}
@@ -53,6 +61,21 @@ def _render_scan_result(result: ScanResult) -> None:
         table.add_row("total", str(len(result.artifacts)))
         output.print(table)
 
+        if eval_result is not None:
+            eval_counts = {source_type: 0 for source_type in EvalSourceType}
+            for scenario in eval_result.scenarios:
+                eval_counts[scenario.source_type] += 1
+
+            eval_table = Table(title="Discovered evals")
+            eval_table.add_column("Source")
+            eval_table.add_column("Count", justify="right")
+            for source_type in EvalSourceType:
+                eval_table.add_row(source_type.value, str(eval_counts[source_type]))
+            eval_table.add_section()
+            eval_table.add_row("total", str(len(eval_result.scenarios)))
+            output.print(eval_table)
+            output.print(f"Eval parse warnings: {len(eval_result.warnings)}", markup=False)
+
         if result.skipped:
             output.print(f"Skipped paths: {len(result.skipped)}", markup=False)
             for skipped_path in result.skipped:
@@ -60,14 +83,29 @@ def _render_scan_result(result: ScanResult) -> None:
 
     if result.warnings:
         output.print("Warnings:")
-        for warning in result.warnings:
-            location = f" [{warning.path}]" if warning.path else ""
-            output.print(f"  {warning.message}{location}", markup=False)
+        for scan_warning in result.warnings:
+            location = f" [{scan_warning.path}]" if scan_warning.path else ""
+            output.print(f"  {scan_warning.message}{location}", markup=False)
 
     if result.errors:
         output.print("Errors:")
-        for error in result.errors:
-            output.print(f"  {error.message}", markup=False)
+        for scan_error in result.errors:
+            output.print(f"  {scan_error.message}", markup=False)
+
+    if eval_result is not None and eval_result.warnings:
+        output.print("Eval parse warnings:")
+        for eval_warning in eval_result.warnings:
+            location = (
+                f"{eval_warning.source_file}:{eval_warning.line}"
+                if eval_warning.line
+                else eval_warning.source_file
+            )
+            output.print(f"  {eval_warning.message} [{location}]", markup=False)
+
+    if eval_result is not None and eval_result.errors:
+        output.print("Eval parse errors:")
+        for eval_error in eval_result.errors:
+            output.print(f"  {eval_error.message} [{eval_error.source_file}]", markup=False)
 
 
 @app.callback(invoke_without_command=True)
@@ -95,6 +133,9 @@ def scan(
 ) -> None:
     """Discover supported artifacts in a repository."""
     result = scan_repository(repository_path)
-    _render_scan_result(result)
+    eval_result = (
+        parse_eval_artifacts(result) if result.completeness is not ScanCompleteness.FAILED else None
+    )
+    _render_scan_result(result, eval_result)
     if result.completeness is ScanCompleteness.FAILED:
         raise typer.Exit(code=1)

@@ -57,7 +57,9 @@ def test_unknown_option_is_a_usage_error() -> None:
 
 
 def test_scan_command_summarizes_valid_repository(tmp_path: Path) -> None:
-    (tmp_path / "agent.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "agent.py").write_text(
+        "def test_answer():\n    assert answer() == 42\n", encoding="utf-8"
+    )
 
     result = runner.invoke(app, ["scan", str(tmp_path)])
 
@@ -66,6 +68,9 @@ def test_scan_command_summarizes_valid_repository(tmp_path: Path) -> None:
     assert "Status: complete" in result.output
     assert "python" in result.output
     assert "total" in result.output
+    assert "Discovered evals" in result.output
+    assert "pytest" in result.output
+    assert "Eval parse warnings: 0" in result.output
 
 
 def test_scan_command_rejects_nonexistent_repository(tmp_path: Path) -> None:
