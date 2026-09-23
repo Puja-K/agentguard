@@ -33,6 +33,14 @@ agentguard scan path/to/repository
 Running `agentguard` without arguments also displays help. Behavior extraction,
 findings, and feedback commands will be added in later milestones.
 
+The scan currently discovers repository artifacts and statically extracts
+pytest-style tests and supported JSONL eval scenarios. It never imports target
+modules or executes target tests. Eval IDs are stable across formatting,
+whitespace, and line movement because they derive from the repository-relative
+file and test symbol, or from the JSONL metadata name/input. File moves, symbol
+renames, duplicate JSONL identities, and major test restructuring may change or
+limit identity in V0.
+
 ## Configuration
 
 The scan command reads an optional `agentguard.toml` from the repository root.
