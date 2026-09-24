@@ -71,6 +71,10 @@ def test_scan_command_summarizes_valid_repository(tmp_path: Path) -> None:
     assert "Discovered evals" in result.output
     assert "pytest" in result.output
     assert "Eval parse warnings: 0" in result.output
+    assert "Detected behaviors" in result.output
+    assert "Behavior extraction warnings: 0" in result.output
+    assert "Coverage assessments" in result.output
+    assert "Candidate pairs considered:" in result.output
 
 
 def test_scan_command_rejects_nonexistent_repository(tmp_path: Path) -> None:

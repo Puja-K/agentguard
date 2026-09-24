@@ -9,8 +9,9 @@ from the existing eval or regression-test suite.
 ## Status
 
 AgentGuard is currently pre-alpha and under active development. The current
-milestone provides the CLI and typed configuration foundation. Repository
-scanning and findings are not implemented yet.
+milestone provides repository discovery plus deterministic eval and behavior
+extraction and behavior-to-eval matching. Findings and feedback are not
+implemented yet.
 
 ## Installation
 
@@ -30,8 +31,8 @@ agentguard --version
 agentguard scan path/to/repository
 ```
 
-Running `agentguard` without arguments also displays help. Behavior extraction,
-findings, and feedback commands will be added in later milestones.
+Running `agentguard` without arguments also displays help. Findings and feedback
+commands will be added in later milestones.
 
 The scan currently discovers repository artifacts and statically extracts
 pytest-style tests and supported JSONL eval scenarios. It never imports target
@@ -40,6 +41,43 @@ whitespace, and line movement because they derive from the repository-relative
 file and test symbol, or from the JSONL metadata name/input. File moves, symbol
 renames, duplicate JSONL identities, and major test restructuring may change or
 limit identity in V0.
+
+Behavior extraction uses Python's AST and currently recognizes conservative,
+explicit patterns:
+
+- functions decorated with `@tool`, qualified `@*.tool`, or `@function_tool`
+- local functions in literal tool lists and `bind_tools([...])` calls
+- declared tool arguments, explicit raises, and explicit failure returns
+- conditional tool branches with a visible return, raise, escalation, or handoff
+- literal LangGraph `add_edge` and `add_conditional_edges` calls on a graph
+  statically assigned from `StateGraph(...)`
+
+Prompt files remain discovery artifacts. Natural-language prompt obligations are
+deferred because V0 has no deterministic rule precise enough to interpret them.
+Behavior IDs derive from a versioned structural identity containing the
+repository-relative path, symbol or graph, behavior type, normalized condition,
+and action. Separate AST fingerprints detect material source changes. IDs survive
+formatting and line movement, but may change after file or symbol renames,
+condition rewrites, or action changes.
+
+Try the deterministic example repository with:
+
+```bash
+agentguard scan examples/refund_agent
+```
+
+Matching first retrieves candidate evals through indexes of referenced symbols,
+expected exceptions, action names, literal values, and normalized identity
+terms. It then applies behavior-specific deterministic rules. `covered` requires
+evidence that an eval exercises the behavior and explicitly verifies its outcome;
+subject overlap without exact outcome evidence is `partially_covered`. A JSONL
+scenario without `expected` cannot establish covered status. Incomplete upstream
+analysis produces an unavailable assessment instead of treating missing evidence
+as a potentially uncovered behavior.
+
+The matcher does not use embeddings, semantic similarity, or prompt-derived
+behaviors. Aliases, indirect calls, dynamic values, fixtures, parametrization,
+and semantically equivalent wording may therefore be missed.
 
 ## Configuration
 
