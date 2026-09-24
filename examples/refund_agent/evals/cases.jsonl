@@ -1,0 +1,2 @@
+{"input":{"amount":900,"authenticated":true},"expected":{"action":"escalate_to_human"},"metadata":{"name":"large refund review","tools":["issue_refund"]}}
+{"input":{"payment_id":"timeout"},"metadata":{"name":"payment timeout without expected outcome","tools":["lookup_payment"]}}

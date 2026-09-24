@@ -44,6 +44,39 @@ class EvalAssertionKind(StrEnum):
     EXPECTED_EXCEPTION = "expected_exception"
 
 
+class BehaviorType(StrEnum):
+    """Deterministic behavior categories supported by V0 extraction."""
+
+    TOOL_INVOCATION = "tool_invocation"
+    TOOL_FAILURE = "tool_failure"
+    CONDITIONAL_BRANCH = "conditional_branch"
+    WORKFLOW_TRANSITION = "workflow_transition"
+    FALLBACK = "fallback"
+    ESCALATION = "escalation"
+
+
+class BehaviorSourceType(StrEnum):
+    """Static source constructs that produce behaviors."""
+
+    PYTHON_TOOL = "python_tool"
+    LANGGRAPH_WORKFLOW = "langgraph_workflow"
+
+
+class CoverageStatus(StrEnum):
+    """Supported V0 behavior coverage classifications."""
+
+    COVERED = "covered"
+    PARTIALLY_COVERED = "partially_covered"
+    POTENTIALLY_UNCOVERED = "potentially_uncovered"
+
+
+class AssessmentAvailability(StrEnum):
+    """Whether available evidence supports a coverage classification."""
+
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
 class SkipReason(StrEnum):
     """Why a path was not included as a discovered artifact."""
 
@@ -112,7 +145,7 @@ class ScanResult(DomainModel):
 
 
 class SourceEvidence(DomainModel):
-    """Inspectible source evidence for an extracted eval fact."""
+    """Inspectible source evidence for an extracted static fact."""
 
     kind: str
     source_file: str
@@ -200,3 +233,138 @@ class EvalParseResult(DomainModel):
     warnings: tuple[EvalParseWarning, ...] = ()
     errors: tuple[EvalParseError, ...] = ()
     completeness: ScanCompleteness
+
+
+class BehaviorCondition(DomainModel):
+    """A statically recoverable condition governing a behavior."""
+
+    expression: str
+    normalized_expression: str
+
+
+class BehaviorAction(DomainModel):
+    """The explicit action or outcome associated with a behavior."""
+
+    kind: str
+    target: str | None = None
+    outcome: str | None = None
+
+
+class ToolArgument(DomainModel):
+    """A statically declared tool argument."""
+
+    name: str
+    required: bool
+    annotation: str | None = None
+    default: str | None = None
+
+
+class Behavior(DomainModel):
+    """A normalized deterministic behavior extracted from repository source."""
+
+    behavior_id: str
+    description: str
+    behavior_type: BehaviorType
+    source_type: BehaviorSourceType
+    source_file: str
+    source_symbol: str | None = None
+    subject: str
+    condition: BehaviorCondition | None = None
+    action: BehaviorAction | None = None
+    arguments: tuple[ToolArgument, ...] = ()
+    evidence: tuple[SourceEvidence, ...] = ()
+    confidence: ConfidenceLevel
+    extractor: str
+    content_fingerprint: str
+
+
+class BehaviorExtractionWarning(DomainModel):
+    """A non-fatal limitation encountered while extracting behaviors."""
+
+    code: str
+    message: str
+    source_file: str
+    line: int | None = None
+
+
+class BehaviorExtractionError(DomainModel):
+    """An artifact-level behavior extraction failure."""
+
+    code: str
+    message: str
+    source_file: str
+
+
+class BehaviorExtractionResult(DomainModel):
+    """Typed result of deterministic behavior extraction."""
+
+    behaviors: tuple[Behavior, ...] = ()
+    warnings: tuple[BehaviorExtractionWarning, ...] = ()
+    errors: tuple[BehaviorExtractionError, ...] = ()
+    completeness: ScanCompleteness
+
+
+class MatchEvidence(DomainModel):
+    """Decomposed deterministic evidence for one behavior/eval candidate pair."""
+
+    candidate_reasons: tuple[str, ...] = ()
+    same_subject: bool = False
+    condition_matches: bool = False
+    branch_matches: bool = False
+    failure_matches: bool = False
+    action_matches: bool = False
+    explicit_assertion: bool = False
+    expected_outcome_present: bool = False
+    details: tuple[str, ...] = ()
+
+
+class BehaviorEvalMatch(DomainModel):
+    """The deterministic relationship between a behavior and candidate eval."""
+
+    eval_id: str
+    coverage_status: CoverageStatus | None = None
+    confidence: ConfidenceLevel
+    evidence: MatchEvidence
+
+
+class BehaviorCoverageAssessment(DomainModel):
+    """Coverage assessment for one extracted behavior."""
+
+    behavior_id: str
+    availability: AssessmentAvailability
+    coverage_status: CoverageStatus | None = None
+    confidence: ConfidenceLevel
+    matched_eval_ids: tuple[str, ...] = ()
+    matches: tuple[BehaviorEvalMatch, ...] = ()
+    explanation: str
+    candidate_count: int
+    matcher: str
+
+
+class MatchingWarning(DomainModel):
+    """A non-fatal limitation encountered during matching."""
+
+    code: str
+    message: str
+    behavior_id: str | None = None
+
+
+class MatchingError(DomainModel):
+    """A fatal or behavior-level matching failure."""
+
+    code: str
+    message: str
+    behavior_id: str | None = None
+
+
+class MatchingResult(DomainModel):
+    """Deterministic behavior-to-eval matching output."""
+
+    assessments: tuple[BehaviorCoverageAssessment, ...] = ()
+    warnings: tuple[MatchingWarning, ...] = ()
+    errors: tuple[MatchingError, ...] = ()
+    completeness: ScanCompleteness
+    behavior_count: int = 0
+    eval_count: int = 0
+    candidate_pair_count: int = 0
+    matcher: str
