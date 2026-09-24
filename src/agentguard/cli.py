@@ -282,11 +282,20 @@ def scan(
 ) -> None:
     """Discover artifacts and assess deterministic behavior coverage."""
     result = scan_repository(repository_path)
-    eval_result = (
-        parse_eval_artifacts(result) if result.completeness is not ScanCompleteness.FAILED else None
-    )
     behavior_result = (
         extract_behaviors(result) if result.completeness is not ScanCompleteness.FAILED else None
+    )
+    eval_result = (
+        parse_eval_artifacts(
+            result,
+            known_tool_names={
+                behavior.subject
+                for behavior in behavior_result.behaviors
+                if behavior.behavior_type is BehaviorType.TOOL_INVOCATION
+            },
+        )
+        if behavior_result is not None
+        else None
     )
     matching_result = (
         match_behaviors_to_evals(behavior_result, eval_result)

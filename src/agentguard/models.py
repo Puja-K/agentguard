@@ -234,6 +234,7 @@ class ReferencedSymbol(DomainModel):
 
     name: str
     qualified_name: str
+    normalized_tool_name: str | None = None
     literal_arguments: tuple[LiteralArgument, ...] = ()
     evidence: SourceEvidence
 

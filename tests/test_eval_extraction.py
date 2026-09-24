@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from agentguard.extractors import parse_eval_artifacts
 from agentguard.models import (
     EvalAssertionKind,
@@ -273,3 +275,59 @@ def test_output_order_is_deterministic(tmp_path: Path) -> None:
     ] == sorted(
         (scenario.source_file, scenario.source_symbol or "") for scenario in first.scenarios
     )
+
+
+@pytest.mark.parametrize("wrapper", ["invoke", "ainvoke", "coroutine"])
+def test_known_tool_wrapper_call_preserves_raw_and_normalizes_identity(
+    tmp_path: Path, wrapper: str
+) -> None:
+    write_file(tmp_path, "agent.py", "@tool\ndef lookup(key):\n    return key\n")
+    write_file(
+        tmp_path,
+        "tests/test_agent.py",
+        f"def test_lookup():\n    result = lookup.{wrapper}({{'key': 'a'}})\n    assert result\n",
+    )
+
+    scenario = parse_repository(tmp_path).scenarios[0]
+    reference = next(
+        item for item in scenario.referenced_symbols if item.qualified_name == f"lookup.{wrapper}"
+    )
+
+    assert reference.name == wrapper
+    assert reference.normalized_tool_name == "lookup"
+
+
+def test_unrelated_object_wrapper_is_not_normalized(tmp_path: Path) -> None:
+    write_file(tmp_path, "agent.py", "@tool\ndef lookup(key):\n    return key\n")
+    write_file(
+        tmp_path,
+        "tests/test_agent.py",
+        "def test_client():\n"
+        "    result = unrelated_object.ainvoke({'key': 'a'})\n"
+        "    assert result\n",
+    )
+
+    reference = next(
+        item
+        for item in parse_repository(tmp_path).scenarios[0].referenced_symbols
+        if item.qualified_name == "unrelated_object.ainvoke"
+    )
+
+    assert reference.normalized_tool_name is None
+
+
+def test_similarly_named_non_tool_wrapper_is_not_normalized(tmp_path: Path) -> None:
+    write_file(tmp_path, "agent.py", "@tool\ndef lookup(key):\n    return key\n")
+    write_file(
+        tmp_path,
+        "tests/test_agent.py",
+        "def test_client():\n    result = lookup_client.ainvoke({'key': 'a'})\n    assert result\n",
+    )
+
+    reference = next(
+        item
+        for item in parse_repository(tmp_path).scenarios[0].referenced_symbols
+        if item.qualified_name == "lookup_client.ainvoke"
+    )
+
+    assert reference.normalized_tool_name is None
