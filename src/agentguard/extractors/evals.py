@@ -3,14 +3,16 @@
 import ast
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import Any, cast
 
 from pydantic import JsonValue
 
+from agentguard.extractors.behaviors import extract_behaviors
 from agentguard.models import (
     ArtifactType,
+    BehaviorType,
     ConfidenceLevel,
     DiscoveredArtifact,
     EvalAssertion,
@@ -30,6 +32,7 @@ from agentguard.models import (
 
 EVAL_ID_VERSION = "eval-v1"
 FINGERPRINT_VERSION = "content-v1"
+TOOL_INVOCATION_WRAPPERS = frozenset({"invoke", "ainvoke", "coroutine"})
 
 
 def _canonical_json(value: JsonValue | dict[str, JsonValue]) -> str:
@@ -196,6 +199,7 @@ def _pytest_references(
     source_file: str,
     source_symbol: str,
     source: str,
+    known_tool_names: Collection[str],
 ) -> tuple[ReferencedSymbol, ...]:
     references: list[ReferencedSymbol] = []
     for node in ast.walk(function):
@@ -204,10 +208,16 @@ def _pytest_references(
         qualified_name = _qualified_name(node.func)
         if qualified_name is None:
             continue
+        normalized_tool_name = None
+        if isinstance(node.func, ast.Attribute) and node.func.attr in TOOL_INVOCATION_WRAPPERS:
+            receiver_name = _qualified_name(node.func.value)
+            if receiver_name in known_tool_names:
+                normalized_tool_name = receiver_name
         references.append(
             ReferencedSymbol(
                 name=qualified_name.rsplit(".", maxsplit=1)[-1],
                 qualified_name=qualified_name,
+                normalized_tool_name=normalized_tool_name,
                 literal_arguments=_literal_arguments(node),
                 evidence=_evidence(
                     kind="call",
@@ -280,7 +290,12 @@ def _expected_from_assertions(
     return ExpectedOutcome(description="; ".join(descriptions))
 
 
-def parse_pytest_artifact(root: Path, artifact: DiscoveredArtifact) -> EvalParseResult:
+def parse_pytest_artifact(
+    root: Path,
+    artifact: DiscoveredArtifact,
+    *,
+    known_tool_names: Collection[str] = (),
+) -> EvalParseResult:
     """Parse pytest-style tests from one Python artifact using AST only."""
     artifact_path = root / artifact.path
     try:
@@ -316,7 +331,13 @@ def parse_pytest_artifact(root: Path, artifact: DiscoveredArtifact) -> EvalParse
     scenarios: list[EvalScenario] = []
     for function, symbol in _test_functions(tree):
         assertions = _pytest_assertions(function, artifact.path, symbol, source)
-        references = _pytest_references(function, artifact.path, symbol, source)
+        references = _pytest_references(
+            function,
+            artifact.path,
+            symbol,
+            source,
+            known_tool_names,
+        )
         docstring = ast.get_docstring(function, clean=True)
         evidence = _evidence(
             kind="pytest_test",
@@ -521,7 +542,11 @@ def parse_jsonl_artifact(root: Path, artifact: DiscoveredArtifact) -> EvalParseR
     )
 
 
-def parse_eval_artifacts(scan_result: ScanResult) -> EvalParseResult:
+def parse_eval_artifacts(
+    scan_result: ScanResult,
+    *,
+    known_tool_names: Collection[str] | None = None,
+) -> EvalParseResult:
     """Parse eval scenarios from a repository discovery manifest."""
     if scan_result.completeness is ScanCompleteness.FAILED or scan_result.repository.root is None:
         return EvalParseResult(
@@ -536,12 +561,23 @@ def parse_eval_artifacts(scan_result: ScanResult) -> EvalParseResult:
         )
 
     root = Path(scan_result.repository.root)
+    if known_tool_names is None:
+        behavior_result = extract_behaviors(scan_result)
+        known_tool_names = {
+            behavior.subject
+            for behavior in behavior_result.behaviors
+            if behavior.behavior_type is BehaviorType.TOOL_INVOCATION
+        }
     scenarios: list[EvalScenario] = []
     warnings: list[EvalParseWarning] = []
     errors: list[EvalParseError] = []
     for artifact in scan_result.artifacts:
         if artifact.artifact_type is ArtifactType.PYTHON:
-            parsed = parse_pytest_artifact(root, artifact)
+            parsed = parse_pytest_artifact(
+                root,
+                artifact,
+                known_tool_names=known_tool_names,
+            )
         elif artifact.artifact_type is ArtifactType.EVAL_JSONL:
             parsed = parse_jsonl_artifact(root, artifact)
         else:

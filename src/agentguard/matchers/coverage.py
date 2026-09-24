@@ -119,7 +119,12 @@ def _scenario_features(scenario: EvalScenario) -> _EvalFeatures:
     symbols = {
         _normalize_name(name)
         for reference in scenario.referenced_symbols
-        for name in (reference.name, reference.qualified_name)
+        for name in (
+            reference.name,
+            reference.qualified_name,
+            reference.normalized_tool_name,
+        )
+        if name is not None
     }
     assertion_text = " ".join(assertion.expression for assertion in scenario.assertions)
     expected_text_parts = [
@@ -233,12 +238,23 @@ def _candidate_reasons(behavior: Behavior, index: _CandidateIndex) -> dict[int, 
 
 def _reference_for_subject(behavior: Behavior, feature: _EvalFeatures) -> ReferencedSymbol | None:
     subject = _normalize_name(behavior.subject)
-    return next(
+    direct = next(
         (
             reference
             for reference in feature.scenario.referenced_symbols
             if _normalize_name(reference.name) == subject
             or _normalize_name(reference.qualified_name) == subject
+        ),
+        None,
+    )
+    if direct is not None:
+        return direct
+    return next(
+        (
+            reference
+            for reference in feature.scenario.referenced_symbols
+            if reference.normalized_tool_name is not None
+            and _normalize_name(reference.normalized_tool_name) == subject
         ),
         None,
     )
@@ -400,15 +416,23 @@ def _classify_candidate(
     same_subject = reference is not None or (
         feature.scenario.source_type is EvalSourceType.JSONL and subject in feature.terms
     )
-    condition_matches = _condition_matches(behavior, feature, reference)
-    action_matches = _action_matches(behavior, feature)
-    failure_matches = _failure_matches(behavior, feature)
+    wrapper_invocation = reference is not None and reference.normalized_tool_name is not None
+    invocation_only = (
+        wrapper_invocation and behavior.behavior_type is not BehaviorType.TOOL_INVOCATION
+    )
+    condition_matches = (
+        False if invocation_only else _condition_matches(behavior, feature, reference)
+    )
+    action_matches = False if invocation_only else _action_matches(behavior, feature)
+    failure_matches = False if invocation_only else _failure_matches(behavior, feature)
     branch_matches = condition_matches and action_matches
     status: CoverageStatus | None = None
     details: list[str] = []
 
     if same_subject:
         details.append("Eval exercises the behavior subject.")
+    if wrapper_invocation:
+        details.append("A statically known tool is invoked through its supported wrapper method.")
     if condition_matches and behavior.condition is not None:
         details.append("Literal inputs satisfy or explicitly identify the behavior condition.")
     if action_matches:

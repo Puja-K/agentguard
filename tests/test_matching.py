@@ -340,3 +340,77 @@ def test_failed_upstream_returns_explicit_matching_error() -> None:
 
     assert result.completeness is ScanCompleteness.FAILED
     assert result.errors[0].code == "upstream_failed"
+
+
+def test_tool_wrapper_invocation_with_assertion_can_cover_invocation(tmp_path: Path) -> None:
+    _write(tmp_path, "agent.py", "@tool\ndef lookup(key):\n    return find(key)\n")
+    _write(
+        tmp_path,
+        "tests/test_agent.py",
+        "def test_lookup():\n"
+        "    result = lookup.ainvoke({'key': 'a'})\n"
+        "    assert result == 'found'\n",
+    )
+
+    behaviors, assessments = _analyze(tmp_path)
+    assessment = _assessment_for(behaviors, assessments, BehaviorType.TOOL_INVOCATION)
+
+    assert assessment.coverage_status is CoverageStatus.COVERED
+    assert assessment.matches[0].evidence.same_subject
+
+
+def test_tool_wrapper_invocation_without_verification_is_partial(tmp_path: Path) -> None:
+    _write(tmp_path, "agent.py", "@tool\ndef lookup(key):\n    return find(key)\n")
+    _write(
+        tmp_path,
+        "tests/test_agent.py",
+        "def test_lookup():\n    lookup.invoke({'key': 'a'})\n",
+    )
+
+    behaviors, assessments = _analyze(tmp_path)
+    assessment = _assessment_for(behaviors, assessments, BehaviorType.TOOL_INVOCATION)
+
+    assert assessment.coverage_status is CoverageStatus.PARTIALLY_COVERED
+
+
+def test_tool_wrapper_success_does_not_cover_failure_behavior(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "agent.py",
+        "@tool\n"
+        "def lookup(key):\n"
+        "    if not key:\n"
+        "        raise ValueError('key required')\n"
+        "    return key\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_agent.py",
+        "def test_lookup():\n"
+        "    result = lookup.coroutine({'key': 'a'})\n"
+        "    assert result == 'a'\n",
+    )
+
+    behaviors, assessments = _analyze(tmp_path)
+    failure = _assessment_for(behaviors, assessments, BehaviorType.TOOL_FAILURE)
+
+    assert failure.coverage_status is CoverageStatus.PARTIALLY_COVERED
+    assert all(not match.evidence.failure_matches for match in failure.matches)
+
+
+def test_non_tool_wrapper_receivers_do_not_match_known_tool(tmp_path: Path) -> None:
+    _write(tmp_path, "agent.py", "@tool\ndef lookup(key):\n    return find(key)\n")
+    _write(
+        tmp_path,
+        "tests/test_agent.py",
+        "def test_clients():\n"
+        "    first = unrelated_object.ainvoke({'key': 'a'})\n"
+        "    second = lookup_client.ainvoke({'key': 'a'})\n"
+        "    assert first and second\n",
+    )
+
+    behaviors, assessments = _analyze(tmp_path)
+    assessment = _assessment_for(behaviors, assessments, BehaviorType.TOOL_INVOCATION)
+
+    assert assessment.coverage_status is CoverageStatus.POTENTIALLY_UNCOVERED
+    assert assessment.matched_eval_ids == ()
