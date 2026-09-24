@@ -9,6 +9,8 @@ from rich.console import Console
 from rich.table import Table
 
 from agentguard.extractors import extract_behaviors, parse_eval_artifacts
+from agentguard.feedback import FindingNotFoundError, FindingStore
+from agentguard.findings import update_findings
 from agentguard.matchers import match_behaviors_to_evals
 from agentguard.models import (
     ArtifactType,
@@ -18,6 +20,9 @@ from agentguard.models import (
     CoverageStatus,
     EvalParseResult,
     EvalSourceType,
+    FindingDisposition,
+    FindingStatus,
+    FindingUpdateResult,
     MatchingResult,
     ScanCompleteness,
     ScanResult,
@@ -70,6 +75,7 @@ def _render_scan_result(
     eval_result: EvalParseResult | None = None,
     behavior_result: BehaviorExtractionResult | None = None,
     matching_result: MatchingResult | None = None,
+    finding_result: FindingUpdateResult | None = None,
 ) -> None:
     completeness = _combined_completeness(result, eval_result, behavior_result, matching_result)
     output = error_console if completeness is ScanCompleteness.FAILED else console
@@ -144,6 +150,32 @@ def _render_scan_result(
                 f"Candidate pairs considered: {matching_result.candidate_pair_count}",
                 markup=False,
             )
+
+        if finding_result is not None:
+            finding_table = Table(title="Actionable findings")
+            finding_table.add_column("Lifecycle")
+            finding_table.add_column("Count", justify="right")
+            finding_table.add_row("new", str(finding_result.new_count))
+            finding_table.add_row("existing", str(finding_result.existing_count))
+            finding_table.add_row("resolved", str(finding_result.resolved_count))
+            finding_table.add_row("reopened", str(finding_result.reopened_count))
+            finding_table.add_row(
+                "no_longer_observed", str(finding_result.no_longer_observed_count)
+            )
+            output.print(finding_table)
+            visible = [
+                finding
+                for finding in finding_result.findings
+                if finding.status is FindingStatus.OPEN
+                and finding.current_disposition is not FindingDisposition.SUPPRESSED
+            ][:5]
+            if visible:
+                output.print("Open findings:")
+                for finding in visible:
+                    output.print(
+                        f"  {finding.finding_id}: {finding.title} [{finding.source_file}]",
+                        markup=False,
+                    )
 
         if result.skipped:
             output.print(f"Skipped paths: {len(result.skipped)}", markup=False)
@@ -238,6 +270,135 @@ def scan(
         if behavior_result is not None and eval_result is not None
         else None
     )
-    _render_scan_result(result, eval_result, behavior_result, matching_result)
+    finding_result = (
+        update_findings(
+            result.repository.root,
+            behavior_result,
+            matching_result,
+        )
+        if result.repository.root is not None
+        and behavior_result is not None
+        and matching_result is not None
+        else None
+    )
+    _render_scan_result(
+        result,
+        eval_result,
+        behavior_result,
+        matching_result,
+        finding_result,
+    )
     if result.completeness is ScanCompleteness.FAILED:
         raise typer.Exit(code=1)
+
+
+def _repository_store(repository: Path) -> FindingStore:
+    supplied = repository.expanduser()
+    if not supplied.exists():
+        raise typer.BadParameter(f"Repository path does not exist: {repository}")
+    if not supplied.is_dir():
+        raise typer.BadParameter(f"Repository path is not a directory: {repository}")
+    return FindingStore(supplied)
+
+
+@app.command("findings")
+def findings_command(
+    repository: Annotated[
+        Path,
+        typer.Option("--repository", "-r", help="Repository containing AgentGuard state."),
+    ] = Path("."),
+) -> None:
+    """Show persisted findings for a repository."""
+    store = _repository_store(repository)
+    findings = store.list_findings()
+    if not findings:
+        console.print("No persisted findings for this repository.")
+        return
+
+    table = Table(title="AgentGuard findings")
+    table.add_column("Finding ID")
+    table.add_column("Status")
+    table.add_column("Coverage")
+    table.add_column("Disposition")
+    table.add_column("Title")
+    for finding in findings:
+        table.add_row(
+            finding.finding_id,
+            finding.status.value,
+            finding.coverage_status.value,
+            finding.current_disposition.value if finding.current_disposition else "-",
+            finding.title,
+        )
+    console.print(table)
+    for finding in findings:
+        console.print(f"\n{finding.finding_id}", markup=False)
+        console.print(f"  Source: {finding.source_file}", markup=False)
+        if finding.source_evidence:
+            console.print(f"  Source evidence: {finding.source_evidence[0].excerpt}", markup=False)
+        console.print(f"  Explanation: {finding.explanation}", markup=False)
+        candidate_eval_ids = tuple(match.eval_id for match in finding.matched_eval_evidence)
+        if candidate_eval_ids:
+            console.print(
+                f"  Candidate evals considered: {', '.join(candidate_eval_ids)}",
+                markup=False,
+            )
+        if finding.matched_eval_ids:
+            console.print(f"  Matched evals: {', '.join(finding.matched_eval_ids)}", markup=False)
+        if finding.suggested_scenario:
+            console.print(f"  Suggested scenario: {finding.suggested_scenario}", markup=False)
+        console.print(
+            f"  Observed resolution: {'yes' if finding.observed_resolution else 'no'}",
+            markup=False,
+        )
+        console.print(
+            f"  Confirmed impact: {'yes' if finding.confirmed_impact else 'no'}",
+            markup=False,
+        )
+
+
+@app.command("feedback")
+def feedback_command(
+    finding_id: Annotated[str, typer.Argument(help="Stable finding ID.")],
+    disposition: Annotated[FindingDisposition, typer.Argument(help="Feedback disposition.")],
+    repository: Annotated[
+        Path,
+        typer.Option("--repository", "-r", help="Repository containing AgentGuard state."),
+    ] = Path("."),
+    reason: Annotated[
+        str | None,
+        typer.Option("--reason", help="Optional explanation for this disposition."),
+    ] = None,
+) -> None:
+    """Persist a user disposition for one finding."""
+    store = _repository_store(repository)
+    try:
+        finding = store.record_feedback(finding_id, disposition, reason=reason)
+    except FindingNotFoundError as error:
+        error_console.print(str(error), markup=False)
+        raise typer.Exit(code=1) from error
+    console.print(
+        f"Recorded {disposition.value} for {finding.finding_id}.",
+        markup=False,
+    )
+
+
+@app.command("confirm-impact")
+def confirm_impact_command(
+    finding_id: Annotated[str, typer.Argument(help="Stable finding ID.")],
+    repository: Annotated[
+        Path,
+        typer.Option("--repository", "-r", help="Repository containing AgentGuard state."),
+    ] = Path("."),
+    note: Annotated[
+        str | None,
+        typer.Option("--note", help="Optional impact confirmation note."),
+    ] = None,
+) -> None:
+    """Explicitly confirm that a finding influenced an eval change."""
+    store = _repository_store(repository)
+    try:
+        finding = store.confirm_impact(finding_id, note=note)
+    except FindingNotFoundError as error:
+        error_console.print(str(error), markup=False)
+        raise typer.Exit(code=1) from error
+    console.print(f"Confirmed impact for {finding.finding_id}.", markup=False)

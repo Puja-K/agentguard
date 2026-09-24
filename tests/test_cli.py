@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentguard.cli import app
+from agentguard.feedback import FindingStore
 from agentguard.models import (
     RepositoryMetadata,
     ScanCompleteness,
@@ -98,9 +99,11 @@ def test_scan_command_rejects_file_path(tmp_path: Path) -> None:
     assert "Status: failed" in result.output
 
 
-def test_scan_command_displays_warning_path_literally(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scan_command_displays_warning_path_literally(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     scan_result = ScanResult(
-        repository=RepositoryMetadata(requested_path="repository", root="/repository"),
+        repository=RepositoryMetadata(requested_path="repository", root=str(tmp_path)),
         skipped=(SkippedPath(path="nested/link.py", reason=SkipReason.UNSUPPORTED),),
         warnings=(
             ScanWarning(
@@ -117,3 +120,55 @@ def test_scan_command_displays_warning_path_literally(monkeypatch: pytest.Monkey
 
     assert result.exit_code == 0
     assert "[nested/link.py]" in result.output
+
+
+def test_findings_feedback_and_confirm_impact_commands(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text(
+        "@tool\ndef archive_record(key):\n    return key\n", encoding="utf-8"
+    )
+    scan_result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert scan_result.exit_code == 0
+
+    findings_result = runner.invoke(app, ["findings", "--repository", str(tmp_path)])
+    assert findings_result.exit_code == 0
+    store = FindingStore(tmp_path)
+    finding_id = store.list_findings()[0].finding_id
+    assert finding_id in findings_result.output
+    assert "Suggested scenario:" in findings_result.output
+
+    feedback_result = runner.invoke(
+        app,
+        ["feedback", finding_id, "add_eval", "--repository", str(tmp_path)],
+    )
+    impact_result = runner.invoke(
+        app,
+        ["confirm-impact", finding_id, "--repository", str(tmp_path)],
+    )
+
+    assert feedback_result.exit_code == 0
+    assert "Recorded add_eval" in feedback_result.output
+    assert impact_result.exit_code == 0
+    assert "Confirmed impact" in impact_result.output
+    assert store.get_finding(finding_id).confirmed_impact
+
+
+def test_cross_repository_scan_writes_only_target_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tool_repository = tmp_path / "tool"
+    target_repository = tmp_path / "target"
+    tool_repository.mkdir()
+    target_repository.mkdir()
+    sentinel = target_repository / "executed"
+    (target_repository / "agent.py").write_text(
+        f"Path({str(sentinel)!r}).touch()\n\n@tool\ndef archive_record(key):\n    return key\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tool_repository)
+
+    result = runner.invoke(app, ["scan", str(target_repository)])
+
+    assert result.exit_code == 0
+    assert (target_repository / ".agentguard" / "agentguard.db").is_file()
+    assert not (tool_repository / ".agentguard").exists()
+    assert not sentinel.exists()

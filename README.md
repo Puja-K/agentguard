@@ -10,8 +10,8 @@ from the existing eval or regression-test suite.
 
 AgentGuard is currently pre-alpha and under active development. The current
 milestone provides repository discovery plus deterministic eval and behavior
-extraction and behavior-to-eval matching. Findings and feedback are not
-implemented yet.
+extraction, behavior-to-eval matching, curated findings, and repository-local
+feedback and lifecycle persistence.
 
 ## Installation
 
@@ -29,10 +29,12 @@ output:
 agentguard --help
 agentguard --version
 agentguard scan path/to/repository
+agentguard findings --repository path/to/repository
+agentguard feedback <finding-id> add_eval --repository path/to/repository
+agentguard confirm-impact <finding-id> --repository path/to/repository
 ```
 
-Running `agentguard` without arguments also displays help. Findings and feedback
-commands will be added in later milestones.
+Running `agentguard` without arguments also displays help.
 
 The scan currently discovers repository artifacts and statically extracts
 pytest-style tests and supported JSONL eval scenarios. It never imports target
@@ -78,6 +80,18 @@ as a potentially uncovered behavior.
 The matcher does not use embeddings, semantic similarity, or prompt-derived
 behaviors. Aliases, indirect calls, dynamic values, fixtures, parametrization,
 and semantically equivalent wording may therefore be missed.
+
+Complete scans select a conservative set of high-confidence actionable findings
+and store them under the scanned repository's `.agentguard/agentguard.db` SQLite
+database. Repeated scans retain stable finding IDs and feedback history. A
+finding is resolved only when a later complete scan finds verified coverage;
+disappearance becomes `no_longer_observed`, and incomplete scans preserve the
+prior state.
+
+Supported feedback dispositions are `add_eval`, `valid_later`,
+`already_covered`, `not_relevant`, and `suppressed`. Feedback never resolves a
+finding by itself. `add_eval` records intent, while `confirm-impact` separately
+records an explicit statement that AgentGuard influenced an eval change.
 
 ## Configuration
 

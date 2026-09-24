@@ -1,5 +1,6 @@
 """Typed domain models shared across AgentGuard."""
 
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -75,6 +76,37 @@ class AssessmentAvailability(StrEnum):
 
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
+
+
+class FindingStatus(StrEnum):
+    """Lifecycle state of a persisted finding."""
+
+    OPEN = "open"
+    RESOLVED = "resolved"
+    NO_LONGER_OBSERVED = "no_longer_observed"
+
+
+class FindingDisposition(StrEnum):
+    """Explicit user feedback supported by V0."""
+
+    ADD_EVAL = "add_eval"
+    VALID_LATER = "valid_later"
+    ALREADY_COVERED = "already_covered"
+    NOT_RELEVANT = "not_relevant"
+    SUPPRESSED = "suppressed"
+
+
+class FindingHistoryEventType(StrEnum):
+    """Append-only finding lifecycle event categories."""
+
+    CREATED = "created"
+    SEEN = "seen"
+    FEEDBACK = "feedback"
+    RESOLVED = "resolved"
+    REOPENED = "reopened"
+    NO_LONGER_OBSERVED = "no_longer_observed"
+    SCAN_INCOMPLETE = "scan_incomplete"
+    IMPACT_CONFIRMED = "impact_confirmed"
 
 
 class SkipReason(StrEnum):
@@ -368,3 +400,106 @@ class MatchingResult(DomainModel):
     eval_count: int = 0
     candidate_pair_count: int = 0
     matcher: str
+
+
+class ResolutionEvidence(DomainModel):
+    """Evidence that a later eval appears to resolve a finding."""
+
+    resolved_at: datetime
+    matched_eval_ids: tuple[str, ...]
+    matcher: str
+    explanation: str
+
+
+class Finding(DomainModel):
+    """A persisted actionable behavior coverage concern."""
+
+    finding_id: str
+    behavior_id: str
+    behavior_type: BehaviorType
+    behavior_subject: str
+    coverage_status: CoverageStatus
+    confidence_at_creation: ConfidenceLevel
+    current_confidence: ConfidenceLevel
+    title: str
+    explanation: str
+    source_file: str
+    source_symbol: str | None = None
+    source_evidence: tuple[SourceEvidence, ...] = ()
+    matched_eval_ids: tuple[str, ...] = ()
+    matched_eval_evidence: tuple[BehaviorEvalMatch, ...] = ()
+    suggested_scenario: str | None = None
+    first_seen: datetime
+    last_seen: datetime
+    status: FindingStatus
+    current_disposition: FindingDisposition | None = None
+    observed_resolution: bool = False
+    resolution_evidence: ResolutionEvidence | None = None
+    confirmed_impact: bool = False
+    matcher: str
+
+
+class FeedbackEvent(DomainModel):
+    """An append-only user disposition event."""
+
+    event_id: str
+    finding_id: str
+    disposition: FindingDisposition
+    occurred_at: datetime
+    reason: str | None = None
+    confidence_at_feedback: ConfidenceLevel
+
+
+class ImpactConfirmationEvent(DomainModel):
+    """Explicit confirmation that AgentGuard influenced an eval change."""
+
+    event_id: str
+    finding_id: str
+    occurred_at: datetime
+    note: str | None = None
+
+
+class FindingHistoryEvent(DomainModel):
+    """An append-only finding lifecycle record."""
+
+    event_id: str
+    finding_id: str
+    event_type: FindingHistoryEventType
+    occurred_at: datetime
+    details: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class FindingSelectionResult(DomainModel):
+    """Actionable findings selected from matching assessments."""
+
+    findings: tuple[Finding, ...] = ()
+    eligible_assessment_count: int = 0
+    duplicate_count: int = 0
+
+
+class FindingUpdateResult(DomainModel):
+    """Summary of lifecycle changes applied for one scan."""
+
+    findings: tuple[Finding, ...] = ()
+    eligible_assessment_count: int = 0
+    new_count: int = 0
+    existing_count: int = 0
+    resolved_count: int = 0
+    reopened_count: int = 0
+    no_longer_observed_count: int = 0
+
+
+class FindingScanRecord(DomainModel):
+    """Persisted scan metadata needed for lifecycle and later metrics."""
+
+    scan_id: str
+    occurred_at: datetime
+    completeness: ScanCompleteness
+    behavior_count: int
+    assessment_count: int
+    eligible_assessment_count: int
+    new_count: int
+    existing_count: int
+    resolved_count: int
+    reopened_count: int
+    no_longer_observed_count: int
