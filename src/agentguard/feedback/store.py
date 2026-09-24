@@ -9,6 +9,7 @@ from pydantic import JsonValue
 
 from agentguard.models import (
     FeedbackEvent,
+    FeedbackReason,
     Finding,
     FindingDisposition,
     FindingHistoryEvent,
@@ -23,6 +24,31 @@ DATABASE_FILENAME = "agentguard.db"
 
 class FindingNotFoundError(LookupError):
     """Raised when a requested finding does not exist in local state."""
+
+
+class InvalidFeedbackReasonError(ValueError):
+    """Raised when a structured reason is invalid for a disposition."""
+
+
+ALREADY_COVERED_REASONS = frozenset(
+    {
+        FeedbackReason.ALIAS_OR_WRAPPER,
+        FeedbackReason.FIXTURE_INDIRECTION,
+        FeedbackReason.PARAMETRIZED_TEST,
+        FeedbackReason.UNSUPPORTED_FRAMEWORK_PATTERN,
+        FeedbackReason.MATCHER_MISSED_EXISTING_EVAL,
+        FeedbackReason.OTHER,
+    }
+)
+NOT_RELEVANT_REASONS = frozenset(
+    {
+        FeedbackReason.BEHAVIOR_NOT_WORTH_TESTING,
+        FeedbackReason.DUPLICATE_CONCERN,
+        FeedbackReason.IMPLEMENTATION_DETAIL,
+        FeedbackReason.INTENTIONALLY_UNCOVERED,
+        FeedbackReason.OTHER,
+    }
+)
 
 
 class FindingStore:
@@ -177,9 +203,21 @@ class FindingStore:
         disposition: FindingDisposition,
         *,
         reason: str | None = None,
+        feedback_reason: FeedbackReason | None = None,
         occurred_at: datetime | None = None,
     ) -> Finding:
         """Append feedback and update the finding's current disposition."""
+        allowed_reasons: frozenset[FeedbackReason]
+        if disposition is FindingDisposition.ALREADY_COVERED:
+            allowed_reasons = ALREADY_COVERED_REASONS
+        elif disposition is FindingDisposition.NOT_RELEVANT:
+            allowed_reasons = NOT_RELEVANT_REASONS
+        else:
+            allowed_reasons = frozenset()
+        if feedback_reason is not None and feedback_reason not in allowed_reasons:
+            raise InvalidFeedbackReasonError(
+                f"Reason {feedback_reason.value!r} is not valid for {disposition.value!r}."
+            )
         timestamp = occurred_at or datetime.now(UTC)
         finding = self.get_finding(finding_id)
         event = FeedbackEvent(
@@ -188,11 +226,14 @@ class FindingStore:
             disposition=disposition,
             occurred_at=timestamp,
             reason=reason,
+            feedback_reason=feedback_reason,
             confidence_at_feedback=finding.current_confidence,
         )
         details: dict[str, JsonValue] = {"disposition": disposition.value}
         if reason is not None:
             details["reason"] = reason
+        if feedback_reason is not None:
+            details["feedback_reason"] = feedback_reason.value
         history = FindingHistoryEvent(
             event_id=f"history_{uuid4().hex}",
             finding_id=finding_id,
@@ -200,7 +241,12 @@ class FindingStore:
             occurred_at=timestamp,
             details=details,
         )
-        updated = finding.model_copy(update={"current_disposition": disposition})
+        updated = finding.model_copy(
+            update={
+                "current_disposition": disposition,
+                "current_feedback_reason": feedback_reason,
+            }
+        )
         with self._connect() as connection:
             self._upsert_finding(connection, updated)
             connection.execute(

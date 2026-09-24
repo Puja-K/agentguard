@@ -1,5 +1,7 @@
 """Command-line interface for AgentGuard."""
 
+import json
+from enum import StrEnum
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated
@@ -9,9 +11,17 @@ from rich.console import Console
 from rich.table import Table
 
 from agentguard.extractors import extract_behaviors, parse_eval_artifacts
-from agentguard.feedback import FindingNotFoundError, FindingStore
+from agentguard.feedback import (
+    ALREADY_COVERED_REASONS,
+    NOT_RELEVANT_REASONS,
+    FindingNotFoundError,
+    FindingStore,
+    InvalidFeedbackReasonError,
+    review_queue,
+)
 from agentguard.findings import update_findings
 from agentguard.matchers import match_behaviors_to_evals
+from agentguard.metrics import calculate_validation_summary, export_validation_data
 from agentguard.models import (
     ArtifactType,
     AssessmentAvailability,
@@ -20,6 +30,7 @@ from agentguard.models import (
     CoverageStatus,
     EvalParseResult,
     EvalSourceType,
+    FeedbackReason,
     FindingDisposition,
     FindingStatus,
     FindingUpdateResult,
@@ -38,6 +49,18 @@ app = typer.Typer(
 )
 console = Console()
 error_console = Console(stderr=True)
+
+
+class BreakdownOption(StrEnum):
+    """Finding attributes available for metrics breakdown output."""
+
+    BEHAVIOR_TYPE = "behavior_type"
+    SOURCE_FILE = "source_file"
+    CONFIDENCE = "confidence"
+    COVERAGE_STATUS = "coverage_status"
+    REJECTION_REASON = "rejection_reason"
+    ALL = "all"
+    NONE = "none"
 
 
 def get_version() -> str:
@@ -368,12 +391,24 @@ def feedback_command(
         str | None,
         typer.Option("--reason", help="Optional explanation for this disposition."),
     ] = None,
+    feedback_reason: Annotated[
+        FeedbackReason | None,
+        typer.Option(
+            "--feedback-reason",
+            help="Optional structured reason for already_covered or not_relevant.",
+        ),
+    ] = None,
 ) -> None:
     """Persist a user disposition for one finding."""
     store = _repository_store(repository)
     try:
-        finding = store.record_feedback(finding_id, disposition, reason=reason)
-    except FindingNotFoundError as error:
+        finding = store.record_feedback(
+            finding_id,
+            disposition,
+            reason=reason,
+            feedback_reason=feedback_reason,
+        )
+    except (FindingNotFoundError, InvalidFeedbackReasonError) as error:
         error_console.print(str(error), markup=False)
         raise typer.Exit(code=1) from error
     console.print(
@@ -402,3 +437,182 @@ def confirm_impact_command(
         error_console.print(str(error), markup=False)
         raise typer.Exit(code=1) from error
     console.print(f"Confirmed impact for {finding.finding_id}.", markup=False)
+
+
+def _format_rate(rate: float | None) -> str:
+    return "not enough data" if rate is None else f"{rate:.1%}"
+
+
+@app.command("metrics")
+def metrics_command(
+    repository: Annotated[
+        Path,
+        typer.Option("--repository", "-r", help="Repository containing AgentGuard state."),
+    ] = Path("."),
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit a machine-readable local JSON export."),
+    ] = False,
+    breakdown: Annotated[
+        BreakdownOption,
+        typer.Option("--breakdown", help="Quality breakdown to display."),
+    ] = BreakdownOption.BEHAVIOR_TYPE,
+) -> None:
+    """Show repository-local feedback, resolution, and V0 validation metrics."""
+    store = _repository_store(repository)
+    if json_output:
+        typer.echo(json.dumps(export_validation_data(store), indent=2, sort_keys=True))
+        return
+
+    summary = calculate_validation_summary(store)
+    console.print("AgentGuard Validation Summary", style="bold")
+    console.print(f"Repository: {summary.repository}", markup=False)
+    console.print(
+        f"Findings: {summary.finding_count} ({summary.reviewed_finding_count} reviewed)",
+        markup=False,
+    )
+    metric_table = Table(title="V0 feedback and outcome metrics")
+    metric_table.add_column("Metric")
+    metric_table.add_column("Result")
+    metric_table.add_column("Count")
+    for metric in summary.metrics:
+        metric_table.add_row(
+            metric.name.value,
+            _format_rate(metric.rate),
+            f"{metric.numerator}/{metric.denominator}",
+        )
+    console.print(metric_table)
+    console.print("Observed resolution does not establish AgentGuard-caused impact.")
+
+    if breakdown is not BreakdownOption.NONE:
+        selected = summary.breakdowns
+        if breakdown is not BreakdownOption.ALL:
+            selected = tuple(item for item in selected if item.dimension == breakdown.value)
+        breakdown_table = Table(title="Finding quality breakdown")
+        breakdown_table.add_column("Dimension")
+        breakdown_table.add_column("Value")
+        breakdown_table.add_column("Total", justify="right")
+        breakdown_table.add_column("Reviewed", justify="right")
+        breakdown_table.add_column("Valid", justify="right")
+        breakdown_table.add_column("False positive", justify="right")
+        for item in selected:
+            breakdown_table.add_row(
+                item.dimension,
+                item.value,
+                str(item.total),
+                str(item.reviewed),
+                str(item.valid_gap),
+                str(item.already_covered),
+            )
+        console.print(breakdown_table)
+
+    progress_table = Table(title="V0 validation progress (repository-local)")
+    progress_table.add_column("Criterion")
+    progress_table.add_column("Current")
+    progress_table.add_column("Target")
+    progress_table.add_column("Status")
+    for criterion in summary.criteria:
+        progress_table.add_row(
+            criterion.name,
+            criterion.current,
+            criterion.target,
+            criterion.status.value,
+        )
+    console.print(progress_table)
+
+
+def _prompt_feedback_reason(disposition: FindingDisposition) -> FeedbackReason | None:
+    if disposition is FindingDisposition.ALREADY_COVERED:
+        allowed = ALREADY_COVERED_REASONS
+    elif disposition is FindingDisposition.NOT_RELEVANT:
+        allowed = NOT_RELEVANT_REASONS
+    else:
+        return None
+    choices = ", ".join(sorted(reason.value for reason in allowed))
+    while True:
+        value = typer.prompt(
+            f"Optional reason ({choices}; Enter to omit)", default="", show_default=False
+        ).strip()
+        if not value:
+            return None
+        try:
+            reason = FeedbackReason(value)
+        except ValueError:
+            console.print(f"Unknown reason: {value}", markup=False)
+            continue
+        if reason in allowed:
+            return reason
+        console.print(f"Reason {value} is not valid for {disposition.value}.", markup=False)
+
+
+@app.command("review")
+def review_command(
+    repository: Annotated[
+        Path,
+        typer.Option("--repository", "-r", help="Repository containing AgentGuard state."),
+    ] = Path("."),
+) -> None:
+    """Interactively review open findings that have no disposition."""
+    store = _repository_store(repository)
+    queue = review_queue(store.list_findings())
+    if not queue:
+        console.print("No open, undispositioned findings to review.")
+        return
+
+    choices: dict[str, FindingDisposition | None] = {
+        disposition.value: disposition for disposition in FindingDisposition
+    }
+    choices["skip"] = None
+    reviewed = 0
+    skipped = 0
+    for index, finding in enumerate(queue, start=1):
+        console.rule(f"Finding {index}/{len(queue)}")
+        console.print(f"{finding.finding_id}: {finding.title}", markup=False)
+        console.print(
+            f"Source: {finding.source_file}"
+            + (f"::{finding.source_symbol}" if finding.source_symbol else ""),
+            markup=False,
+        )
+        console.print(
+            f"Coverage: {finding.coverage_status.value}; confidence: "
+            f"{finding.current_confidence.value}",
+            markup=False,
+        )
+        for evidence in finding.source_evidence:
+            console.print(f"Source evidence: {evidence.excerpt}", markup=False)
+        console.print(f"Why flagged: {finding.explanation}", markup=False)
+        candidate_ids = tuple(match.eval_id for match in finding.matched_eval_evidence)
+        console.print(
+            "Evals considered: " + (", ".join(candidate_ids) if candidate_ids else "none"),
+            markup=False,
+        )
+        for match in finding.matched_eval_evidence:
+            status = match.coverage_status.value if match.coverage_status else "insufficient"
+            console.print(
+                f"  {match.eval_id}: {status}, confidence {match.confidence.value}",
+                markup=False,
+            )
+            for detail in match.evidence.details:
+                console.print(f"    Evidence: {detail}", markup=False)
+        if finding.suggested_scenario:
+            console.print(f"Suggested eval: {finding.suggested_scenario}", markup=False)
+        while True:
+            value = typer.prompt(
+                "Disposition (add_eval, valid_later, already_covered, not_relevant, "
+                "suppressed, skip)"
+            ).strip()
+            if value in choices:
+                break
+            console.print(f"Unknown disposition: {value}", markup=False)
+        disposition = choices[value]
+        if disposition is None:
+            skipped += 1
+            continue
+        feedback_reason = _prompt_feedback_reason(disposition)
+        store.record_feedback(
+            finding.finding_id,
+            disposition,
+            feedback_reason=feedback_reason,
+        )
+        reviewed += 1
+    console.print(f"Review complete: {reviewed} recorded, {skipped} skipped.", markup=False)

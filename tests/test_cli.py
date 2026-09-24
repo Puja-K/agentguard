@@ -1,5 +1,6 @@
 """Tests for the AgentGuard command-line foundation."""
 
+import json
 from importlib.metadata import version
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from typer.testing import CliRunner
 from agentguard.cli import app
 from agentguard.feedback import FindingStore
 from agentguard.models import (
+    FeedbackReason,
+    FindingDisposition,
     RepositoryMetadata,
     ScanCompleteness,
     ScanResult,
@@ -172,3 +175,63 @@ def test_cross_repository_scan_writes_only_target_state(
     assert (target_repository / ".agentguard" / "agentguard.db").is_file()
     assert not (tool_repository / ".agentguard").exists()
     assert not sentinel.exists()
+
+
+def test_review_command_persists_interactive_disposition_and_reason(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text(
+        "@tool\ndef archive_record(key):\n    return key\n", encoding="utf-8"
+    )
+    assert runner.invoke(app, ["scan", str(tmp_path)]).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        ["review", "--repository", str(tmp_path)],
+        input="already_covered\nfixture_indirection\n",
+    )
+
+    assert result.exit_code == 0
+    assert "Source evidence:" in result.output
+    assert "Suggested eval:" in result.output
+    assert "Review complete: 1 recorded, 0 skipped." in result.output
+    finding = FindingStore(tmp_path).list_findings()[0]
+    assert finding.current_disposition is FindingDisposition.ALREADY_COVERED
+    assert finding.current_feedback_reason is FeedbackReason.FIXTURE_INDIRECTION
+
+
+def test_review_command_can_skip_without_persisting_feedback(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text(
+        "@tool\ndef archive_record(key):\n    return key\n", encoding="utf-8"
+    )
+    assert runner.invoke(app, ["scan", str(tmp_path)]).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        ["review", "--repository", str(tmp_path)],
+        input="skip\n",
+    )
+
+    assert result.exit_code == 0
+    assert "Review complete: 0 recorded, 1 skipped." in result.output
+    assert FindingStore(tmp_path).list_findings()[0].current_disposition is None
+
+
+def test_metrics_command_human_and_json_output(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text(
+        "@tool\ndef archive_record(key):\n    return key\n", encoding="utf-8"
+    )
+    assert runner.invoke(app, ["scan", str(tmp_path)]).exit_code == 0
+    store = FindingStore(tmp_path)
+    finding_id = store.list_findings()[0].finding_id
+    store.record_feedback(finding_id, FindingDisposition.ADD_EVAL)
+
+    human = runner.invoke(app, ["metrics", "--repository", str(tmp_path)])
+    machine = runner.invoke(app, ["metrics", "--repository", str(tmp_path), "--json"])
+
+    assert human.exit_code == 0
+    assert "valid_gap_rate" in human.output
+    assert "100.0%" in human.output
+    assert "Observed resolution does not establish" in human.output
+    assert machine.exit_code == 0
+    payload = json.loads(machine.output)
+    assert payload["summary"]["reviewed_finding_count"] == 1
+    assert "source_evidence" not in payload["findings"][0]

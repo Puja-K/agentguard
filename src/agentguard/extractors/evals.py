@@ -132,7 +132,7 @@ def _pytest_assertions(
                     ),
                 )
             )
-        if isinstance(node, (ast.With, ast.AsyncWith)):
+        if isinstance(node, ast.With | ast.AsyncWith):
             for item in node.items:
                 call = item.context_expr
                 if not isinstance(call, ast.Call):
@@ -234,14 +234,14 @@ def _test_functions(
     tree: ast.Module,
 ) -> Iterable[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str]]:
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith(
             "test_"
         ):
             yield node, node.name
         if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
             for child in node.body:
                 if isinstance(
-                    child, (ast.FunctionDef, ast.AsyncFunctionDef)
+                    child, ast.FunctionDef | ast.AsyncFunctionDef
                 ) and child.name.startswith("test_"):
                     yield child, f"{node.name}.{child.name}"
 
