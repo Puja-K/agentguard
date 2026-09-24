@@ -46,7 +46,9 @@ def _refresh_finding(existing: Finding, current: Finding, timestamp: datetime) -
             "first_seen": existing.first_seen,
             "last_seen": timestamp,
             "current_disposition": existing.current_disposition,
+            "current_feedback_reason": existing.current_feedback_reason,
             "confirmed_impact": existing.confirmed_impact,
+            "assessment_available": True,
             "status": FindingStatus.OPEN,
             "observed_resolution": False,
             "resolution_evidence": None,
@@ -74,6 +76,7 @@ def _resolve_finding(
             "matched_eval_evidence": assessment.matches,
             "current_confidence": assessment.confidence,
             "matcher": assessment.matcher,
+            "assessment_available": True,
         }
     )
 
@@ -140,7 +143,9 @@ def update_findings(
             assessment = assessments.get(behavior_id)
             if assessment is not None and assessment.coverage_status is CoverageStatus.COVERED:
                 if existing.status is FindingStatus.RESOLVED:
-                    updated[behavior_id] = existing.model_copy(update={"last_seen": timestamp})
+                    updated[behavior_id] = existing.model_copy(
+                        update={"last_seen": timestamp, "assessment_available": True}
+                    )
                     continue
                 resolved = _resolve_finding(existing, assessment, timestamp)
                 updated[behavior_id] = resolved
@@ -157,7 +162,12 @@ def update_findings(
                 if existing.status is FindingStatus.NO_LONGER_OBSERVED:
                     updated[behavior_id] = existing
                     continue
-                missing = existing.model_copy(update={"status": FindingStatus.NO_LONGER_OBSERVED})
+                missing = existing.model_copy(
+                    update={
+                        "status": FindingStatus.NO_LONGER_OBSERVED,
+                        "assessment_available": True,
+                    }
+                )
                 updated[behavior_id] = missing
                 no_longer_observed_count += 1
                 history.append(
@@ -181,6 +191,7 @@ def update_findings(
                             "resolution_evidence": None,
                             "coverage_status": assessment.coverage_status,
                             "current_confidence": assessment.confidence,
+                            "assessment_available": True,
                         }
                     )
                     reopened_count += 1
@@ -192,7 +203,9 @@ def update_findings(
                         )
                     )
                 else:
-                    updated[behavior_id] = existing.model_copy(update={"last_seen": timestamp})
+                    updated[behavior_id] = existing.model_copy(
+                        update={"last_seen": timestamp, "assessment_available": True}
+                    )
                     history.append(
                         _history_event(
                             existing.finding_id,
@@ -202,7 +215,7 @@ def update_findings(
                     )
     else:
         for behavior_id, existing in existing_findings.items():
-            updated[behavior_id] = existing
+            updated[behavior_id] = existing.model_copy(update={"assessment_available": False})
             history.append(
                 _history_event(
                     existing.finding_id,

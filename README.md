@@ -32,6 +32,9 @@ agentguard scan path/to/repository
 agentguard findings --repository path/to/repository
 agentguard feedback <finding-id> add_eval --repository path/to/repository
 agentguard confirm-impact <finding-id> --repository path/to/repository
+agentguard review --repository path/to/repository
+agentguard metrics --repository path/to/repository
+agentguard metrics --repository path/to/repository --json
 ```
 
 Running `agentguard` without arguments also displays help.
@@ -92,6 +95,25 @@ Supported feedback dispositions are `add_eval`, `valid_later`,
 `already_covered`, `not_relevant`, and `suppressed`. Feedback never resolves a
 finding by itself. `add_eval` records intent, while `confirm-impact` separately
 records an explicit statement that AgentGuard influenced an eval change.
+
+`agentguard review` walks through open findings that have no disposition and
+shows their source evidence, eval evidence, explanation, and suggested scenario.
+Rejections can include a structured reason so recurring matcher limitations can
+be inspected by behavior type, source file, confidence, coverage state, or
+rejection reason.
+
+`agentguard metrics` calculates repository-local Valid Gap, Intent-to-Act,
+False Positive, Observed Resolution, Confirmed Impact, and Resolved-by-Test
+rates. It reports a rate as `not enough data` when its denominator is empty.
+Observed resolution remains separate from explicit confirmation that AgentGuard
+influenced a test change. The `--json` form exports IDs, classifications,
+lifecycle state, feedback, and timestamps without source excerpts or source
+contents. AgentGuard does not upload this data.
+
+V0 validation targets are shown individually as progress indicators. The local
+database can count scans for its repository; comparing progress across multiple
+repositories requires combining their explicit JSON exports. The metrics are
+feedback and product-validation rates, not a behavioral coverage percentage.
 
 ## Configuration
 

@@ -96,6 +96,40 @@ class FindingDisposition(StrEnum):
     SUPPRESSED = "suppressed"
 
 
+class FeedbackReason(StrEnum):
+    """Structured reasons for already-covered or not-relevant feedback."""
+
+    ALIAS_OR_WRAPPER = "alias_or_wrapper"
+    FIXTURE_INDIRECTION = "fixture_indirection"
+    PARAMETRIZED_TEST = "parametrized_test"
+    UNSUPPORTED_FRAMEWORK_PATTERN = "unsupported_framework_pattern"
+    MATCHER_MISSED_EXISTING_EVAL = "matcher_missed_existing_eval"
+    BEHAVIOR_NOT_WORTH_TESTING = "behavior_not_worth_testing"
+    DUPLICATE_CONCERN = "duplicate_concern"
+    IMPLEMENTATION_DETAIL = "implementation_detail"
+    INTENTIONALLY_UNCOVERED = "intentionally_uncovered"
+    OTHER = "other"
+
+
+class MetricName(StrEnum):
+    """Feedback and outcome metrics used to validate V0."""
+
+    VALID_GAP_RATE = "valid_gap_rate"
+    INTENT_TO_ACT_RATE = "intent_to_act_rate"
+    OBSERVED_RESOLUTION_RATE = "observed_resolution_rate"
+    CONFIRMED_IMPACT_RATE = "confirmed_impact_rate"
+    FALSE_POSITIVE_RATE = "false_positive_rate"
+    RESOLVED_BY_TEST_RATE = "resolved_by_test_rate"
+
+
+class ValidationCriterionStatus(StrEnum):
+    """Progress state for one V0 validation criterion."""
+
+    PASS = "pass"
+    NOT_YET = "not_yet"
+    NOT_ENOUGH_DATA = "not_enough_data"
+
+
 class FindingHistoryEventType(StrEnum):
     """Append-only finding lifecycle event categories."""
 
@@ -433,6 +467,8 @@ class Finding(DomainModel):
     last_seen: datetime
     status: FindingStatus
     current_disposition: FindingDisposition | None = None
+    current_feedback_reason: FeedbackReason | None = None
+    assessment_available: bool = True
     observed_resolution: bool = False
     resolution_evidence: ResolutionEvidence | None = None
     confirmed_impact: bool = False
@@ -447,6 +483,7 @@ class FeedbackEvent(DomainModel):
     disposition: FindingDisposition
     occurred_at: datetime
     reason: str | None = None
+    feedback_reason: FeedbackReason | None = None
     confidence_at_feedback: ConfidenceLevel
 
 
@@ -503,3 +540,60 @@ class FindingScanRecord(DomainModel):
     resolved_count: int
     reopened_count: int
     no_longer_observed_count: int
+
+
+class MetricCohort(DomainModel):
+    """Inspectable denominator used for one metric."""
+
+    description: str
+    eligible_finding_ids: tuple[str, ...] = ()
+    excluded_finding_count: int = 0
+
+
+class MetricResult(DomainModel):
+    """One named V0 metric with an explicit numerator and denominator."""
+
+    name: MetricName
+    numerator: int
+    denominator: int
+    rate: float | None
+    cohort: MetricCohort
+    explanation: str
+
+
+class FindingBreakdown(DomainModel):
+    """Quality counts grouped by a deterministic finding attribute."""
+
+    dimension: str
+    value: str
+    total: int
+    reviewed: int
+    valid_gap: int
+    add_eval: int
+    already_covered: int
+    not_relevant: int
+    suppressed: int
+    observed_resolution: int
+    confirmed_impact: int
+
+
+class ValidationCriterion(DomainModel):
+    """Progress toward one requirement-defined V0 validation target."""
+
+    name: str
+    current: str
+    target: str
+    status: ValidationCriterionStatus
+    explanation: str
+
+
+class ValidationSummary(DomainModel):
+    """Repository-local metrics, quality breakdowns, and V0 progress."""
+
+    repository: str
+    finding_count: int
+    reviewed_finding_count: int
+    scan_count: int
+    metrics: tuple[MetricResult, ...]
+    breakdowns: tuple[FindingBreakdown, ...]
+    criteria: tuple[ValidationCriterion, ...]
