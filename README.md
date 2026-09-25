@@ -8,22 +8,25 @@ from the existing eval or regression-test suite.
 
 ## Status
 
-AgentGuard is currently pre-alpha and under active development. The current
-milestone provides repository discovery plus deterministic eval and behavior
+AgentGuard is currently pre-alpha. V0 provides repository discovery plus deterministic eval and behavior
 extraction, behavior-to-eval matching, curated findings, and repository-local
 feedback and lifecycle persistence.
 
 ## Installation
 
-AgentGuard requires Python 3.12 or newer. To install the project for local
-development:
+AgentGuard requires Python 3.12 or newer. Install the CLI from PyPI with:
+
+```bash
+python -m pip install agentguard
+```
+
+To install the project for local development from a source checkout:
 
 ```bash
 python -m pip install -e ".[dev]"
 ```
 
-The installed CLI supports repository artifact discovery, help, and version
-output:
+The installed CLI supports:
 
 ```bash
 agentguard --help
@@ -38,6 +41,10 @@ agentguard metrics --repository path/to/repository --json
 ```
 
 Running `agentguard` without arguments also displays help.
+
+Release maintainers should follow the
+[release guide](https://github.com/Puja-K/agentguard/blob/main/docs/releasing.md)
+for PyPI Trusted Publisher setup and the tag-based release process.
 
 The scan currently discovers repository artifacts and statically extracts
 pytest-style tests and supported JSONL eval scenarios. It never imports target

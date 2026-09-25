@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.25,<1.32"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,24 +8,34 @@ version = "0.1.0"
 description = "Open-source scanner for finding potentially untested AI agent behaviors."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
+  { name = "Puja Kamath" }
+]
+maintainers = [
   { name = "Puja Kamath" }
 ]
 keywords = [
   "ai",
   "agents",
+  "cli",
   "evals",
-  "testing",
-  "llm",
   "agent-testing",
-  "evaluation"
+  "evaluation",
+  "static-analysis",
+  "testing",
 ]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
   "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Testing",
+  "Typing :: Typed",
 ]
 
 dependencies = [
@@ -40,13 +50,30 @@ dev = [
   "pytest-cov>=5.0,<7.0",
   "ruff>=0.6,<1.0",
   "mypy>=1.11,<2.0",
+  "build>=1.2,<2.0",
+  "twine>=6.0,<7.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Puja-K/agentguard"
+Documentation = "https://github.com/Puja-K/agentguard#readme"
+Repository = "https://github.com/Puja-K/agentguard"
+Issues = "https://github.com/Puja-K/agentguard/issues"
 
 [project.scripts]
 agentguard = "agentguard.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentguard"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src/agentguard",
+  "/docs/releasing.md",
+  "/LICENSE",
+  "/README.md",
+  "/pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
