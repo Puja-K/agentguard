@@ -2,9 +2,11 @@
 
 import json
 from importlib.metadata import version
+from io import StringIO
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from agentguard.cli import app
@@ -19,6 +21,7 @@ from agentguard.models import (
     SkippedPath,
     SkipReason,
 )
+from agentguard.progress import ScanProgressReporter
 
 runner = CliRunner()
 
@@ -81,6 +84,81 @@ def test_scan_command_summarizes_valid_repository(tmp_path: Path) -> None:
     assert "Candidate pairs considered:" in result.output
 
 
+def test_scan_command_reports_all_major_progress_phases(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text("@tool\ndef answer():\n    return 42\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert f"Scanning {tmp_path}" in result.output
+    assert "Repository discovery complete" in result.output
+    assert "Behavior extraction complete" in result.output
+    assert "Eval extraction complete" in result.output
+    assert "Behavior matching complete" in result.output
+    assert "Findings update complete" in result.output
+
+
+def test_scan_no_progress_suppresses_progress_but_keeps_summary(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text("value = 1\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", str(tmp_path), "--no-progress"])
+
+    assert result.exit_code == 0
+    assert "Scanning " not in result.output
+    assert "Repository discovery complete" not in result.output
+    assert f"Repository: {tmp_path}" in result.output
+    assert "Status: complete" in result.output
+
+
+def test_non_tty_progress_is_plain_text_without_control_sequences(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text("value = 1\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Discovering repository artifacts..." in result.output
+    assert "\x1b[" not in result.output
+    assert "\r" not in result.output
+
+
+def test_interactive_progress_reports_start_and_completed_phase(tmp_path: Path) -> None:
+    output = StringIO()
+    progress = ScanProgressReporter(
+        Console(file=output, force_terminal=True, color_system=None),
+    )
+
+    progress.start(tmp_path)
+    with progress.phase("Discovering repository artifacts", "Repository discovery"):
+        pass
+    progress.complete(
+        "Repository discovery",
+        ScanCompleteness.COMPLETE,
+        detail="3 artifacts",
+    )
+
+    rendered = output.getvalue()
+    assert f"Scanning {tmp_path}" in rendered
+    assert "Repository discovery complete — 3 artifacts" in rendered
+
+
+def test_progress_phase_failure_stops_status_and_reports_failure() -> None:
+    output = StringIO()
+    progress = ScanProgressReporter(
+        Console(file=output, force_terminal=True, color_system=None),
+    )
+
+    with (
+        pytest.raises(RuntimeError, match="phase failed"),
+        progress.phase("Parsing eval scenarios", "Eval extraction"),
+    ):
+        raise RuntimeError("phase failed")
+    progress.console.print("after failure")
+
+    rendered = output.getvalue()
+    assert "Eval extraction failed" in rendered
+    assert "after failure" in rendered
+
+
 def test_scan_command_rejects_nonexistent_repository(tmp_path: Path) -> None:
     missing_path = tmp_path / "missing"
 
@@ -88,6 +166,7 @@ def test_scan_command_rejects_nonexistent_repository(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "Repository path does not exist" in result.output
+    assert "Repository discovery failed" in result.output
     assert "Status: failed" in result.output
 
 
@@ -123,6 +202,8 @@ def test_scan_command_displays_warning_path_literally(
 
     assert result.exit_code == 0
     assert "[nested/link.py]" in result.output
+    assert "Repository discovery incomplete" in result.output
+    assert "Repository discovery complete" not in result.output
 
 
 def test_findings_feedback_and_confirm_impact_commands(tmp_path: Path) -> None:

@@ -38,6 +38,7 @@ from agentguard.models import (
     ScanCompleteness,
     ScanResult,
 )
+from agentguard.progress import ScanProgressReporter
 from agentguard.scanners import scan_repository
 
 PACKAGE_NAME = "agentguard"
@@ -91,6 +92,22 @@ def _combined_completeness(
     if ScanCompleteness.INCOMPLETE in statuses:
         return ScanCompleteness.INCOMPLETE
     return ScanCompleteness.COMPLETE
+
+
+def _progress_detail(
+    count: int,
+    noun: str,
+    *,
+    warnings: int = 0,
+    errors: int = 0,
+) -> str:
+    """Format only counts already produced by a completed scan phase."""
+    parts = [f"{count:,} {noun}"]
+    if warnings:
+        parts.append(f"{warnings:,} warning{'s' if warnings != 1 else ''}")
+    if errors:
+        parts.append(f"{errors:,} error{'s' if errors != 1 else ''}")
+    return ", ".join(parts)
 
 
 def _render_scan_result(
@@ -279,40 +296,97 @@ def main(
 @app.command()
 def scan(
     repository_path: Annotated[Path, typer.Argument(help="Repository directory to scan.")],
+    no_progress: Annotated[
+        bool,
+        typer.Option("--no-progress", help="Disable scan progress messages."),
+    ] = False,
 ) -> None:
     """Discover artifacts and assess deterministic behavior coverage."""
-    result = scan_repository(repository_path)
-    behavior_result = (
-        extract_behaviors(result) if result.completeness is not ScanCompleteness.FAILED else None
+    progress = ScanProgressReporter(console, enabled=not no_progress)
+    progress.start(repository_path.expanduser().resolve())
+
+    with progress.phase("Discovering repository artifacts", "Repository discovery"):
+        result = scan_repository(repository_path)
+    progress.complete(
+        "Repository discovery",
+        result.completeness,
+        detail=_progress_detail(
+            len(result.artifacts),
+            "artifacts",
+            warnings=len(result.warnings),
+            errors=len(result.errors),
+        ),
     )
-    eval_result = (
-        parse_eval_artifacts(
-            result,
-            known_tool_names={
-                behavior.subject
-                for behavior in behavior_result.behaviors
-                if behavior.behavior_type is BehaviorType.TOOL_INVOCATION
-            },
+
+    behavior_result: BehaviorExtractionResult | None = None
+    eval_result: EvalParseResult | None = None
+    matching_result: MatchingResult | None = None
+    finding_result: FindingUpdateResult | None = None
+    if result.completeness is not ScanCompleteness.FAILED:
+        with progress.phase("Extracting agent behaviors", "Behavior extraction"):
+            behavior_result = extract_behaviors(result)
+        progress.complete(
+            "Behavior extraction",
+            behavior_result.completeness,
+            detail=_progress_detail(
+                len(behavior_result.behaviors),
+                "behaviors",
+                warnings=len(behavior_result.warnings),
+                errors=len(behavior_result.errors),
+            ),
         )
-        if behavior_result is not None
-        else None
-    )
-    matching_result = (
-        match_behaviors_to_evals(behavior_result, eval_result)
-        if behavior_result is not None and eval_result is not None
-        else None
-    )
-    finding_result = (
-        update_findings(
-            result.repository.root,
-            behavior_result,
-            matching_result,
+
+        with progress.phase("Parsing eval scenarios", "Eval extraction"):
+            eval_result = parse_eval_artifacts(
+                result,
+                known_tool_names={
+                    behavior.subject
+                    for behavior in behavior_result.behaviors
+                    if behavior.behavior_type is BehaviorType.TOOL_INVOCATION
+                },
+            )
+        progress.complete(
+            "Eval extraction",
+            eval_result.completeness,
+            detail=_progress_detail(
+                len(eval_result.scenarios),
+                "scenarios",
+                warnings=len(eval_result.warnings),
+                errors=len(eval_result.errors),
+            ),
         )
-        if result.repository.root is not None
-        and behavior_result is not None
-        and matching_result is not None
-        else None
-    )
+
+        with progress.phase("Matching behaviors to evals", "Behavior matching"):
+            matching_result = match_behaviors_to_evals(behavior_result, eval_result)
+        progress.complete(
+            "Behavior matching",
+            matching_result.completeness,
+            detail=_progress_detail(
+                matching_result.candidate_pair_count,
+                "candidate pairs",
+                warnings=len(matching_result.warnings),
+                errors=len(matching_result.errors),
+            ),
+        )
+
+        if result.repository.root is not None:
+            with progress.phase("Updating findings", "Findings update"):
+                finding_result = update_findings(
+                    result.repository.root,
+                    behavior_result,
+                    matching_result,
+                )
+            open_count = sum(
+                finding.status is FindingStatus.OPEN for finding in finding_result.findings
+            )
+            resolved_count = sum(
+                finding.status is FindingStatus.RESOLVED for finding in finding_result.findings
+            )
+            progress.complete(
+                "Findings update",
+                _combined_completeness(result, eval_result, behavior_result, matching_result),
+                detail=f"{open_count:,} open, {resolved_count:,} resolved",
+            )
     _render_scan_result(
         result,
         eval_result,
