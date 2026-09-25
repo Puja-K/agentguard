@@ -264,6 +264,7 @@ def test_matching_eval_resolves_with_observed_resolution_only(tmp_path: Path) ->
     assert update.resolved_count == 1
     assert finding.finding_id == finding_id
     assert finding.status is FindingStatus.RESOLVED
+    assert finding.coverage_status is CoverageStatus.COVERED
     assert finding.observed_resolution
     assert finding.resolution_evidence is not None
     assert finding.resolution_evidence.matched_eval_ids == ("eval_timeout",)
@@ -271,6 +272,31 @@ def test_matching_eval_resolves_with_observed_resolution_only(tmp_path: Path) ->
     assert FindingHistoryEventType.RESOLVED in {
         event.event_type for event in store.history(finding_id)
     }
+
+    refreshed = _assessment(
+        behavior,
+        status=CoverageStatus.COVERED,
+        matched_eval_ids=("eval_timeout_revised",),
+    )
+    refreshed_results = _results(behavior, refreshed)
+    repeated = update_findings(
+        tmp_path,
+        *refreshed_results,
+        observed_at=SECOND_SCAN + timedelta(hours=1),
+    )
+    repeated_finding = repeated.findings[0]
+
+    assert repeated.resolved_count == 0
+    assert repeated_finding.coverage_status is CoverageStatus.COVERED
+    assert repeated_finding.matched_eval_ids == ("eval_timeout_revised",)
+    assert repeated_finding.resolution_evidence == finding.resolution_evidence
+    assert (
+        sum(
+            event.event_type is FindingHistoryEventType.RESOLVED
+            for event in store.history(finding_id)
+        )
+        == 1
+    )
 
 
 def test_confirmed_impact_requires_explicit_event(tmp_path: Path) -> None:

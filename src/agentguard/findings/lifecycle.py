@@ -74,6 +74,7 @@ def _resolve_finding(
             ),
             "matched_eval_ids": assessment.matched_eval_ids,
             "matched_eval_evidence": assessment.matches,
+            "coverage_status": assessment.coverage_status,
             "current_confidence": assessment.confidence,
             "matcher": assessment.matcher,
             "assessment_available": True,
@@ -144,7 +145,15 @@ def update_findings(
             if assessment is not None and assessment.coverage_status is CoverageStatus.COVERED:
                 if existing.status is FindingStatus.RESOLVED:
                     updated[behavior_id] = existing.model_copy(
-                        update={"last_seen": timestamp, "assessment_available": True}
+                        update={
+                            "last_seen": timestamp,
+                            "coverage_status": assessment.coverage_status,
+                            "current_confidence": assessment.confidence,
+                            "matched_eval_ids": assessment.matched_eval_ids,
+                            "matched_eval_evidence": assessment.matches,
+                            "matcher": assessment.matcher,
+                            "assessment_available": True,
+                        }
                     )
                     continue
                 resolved = _resolve_finding(existing, assessment, timestamp)
