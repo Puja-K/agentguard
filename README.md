@@ -1,61 +1,11 @@
-
 # AgentGuard
 
-**Find what your AI agent evals aren't testing.**
+**Find what your agent evals aren't testing.**
 
-AgentGuard statically scans your agent code and eval suite to surface
-high-confidence behaviors that may be insufficiently tested.
+AgentGuard is an open-source developer tool that scans an AI-agent repository
+and identifies potentially important agent behaviors that appear to be missing
+from the existing eval or regression-test suite.
 
-No code execution. No cloud upload. No API key.
-
-## Try AgentGuard in 3 minutes
-
-### 1. Install
-
-Requires Python 3.12+.
-
-[installation command]
-
-### 2. Scan your agent repository
-
-cd your-agent-repo
-agentguard scan .
-
-### 3. Review potential gaps
-
-agentguard review
-
-Example:
-
-Potential eval gap
-
-Tool: create_jira_ticket
-
-Why flagged:
-AgentGuard found the tool behavior but no eval that both exercises
-the behavior and verifies its outcome.
-
-Suggested test:
-Call create_jira_ticket with valid inputs and verify the expected mutation.
-
-Choose:
-[a] Add eval
-[l] Valid, later
-[c] Already covered
-[n] Not relevant
-[s] Suppress
-
-### 4. See your results
-
-agentguard metrics --repository .
-
-### 5. Help validate AgentGuard
-
-Run:
-
-agentguard metrics --repository . --json > agentguard-validation.json
-
-Then [complete our 2-minute feedback form](https://forms.gle/n3CHHB8XVX5MpV7y6)
 ## Status
 
 AgentGuard is currently pre-alpha and under active development. The current
