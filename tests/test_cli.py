@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from rich.console import Console
+from rich.text import Text
 from typer.testing import CliRunner
 
 from agentguard.cli import app
@@ -28,18 +29,20 @@ runner = CliRunner()
 
 def test_help_succeeds() -> None:
     result = runner.invoke(app, ["--help"])
+    output = Text.from_ansi(result.output).plain
 
     assert result.exit_code == 0
-    assert "Find potentially important AI-agent behaviors" in result.output
-    assert "--version" in result.output
+    assert "Find potentially important AI-agent behaviors" in output
+    assert "--version" in output
 
 
 def test_bare_invocation_displays_help_and_succeeds() -> None:
     result = runner.invoke(app)
+    output = Text.from_ansi(result.output).plain
 
     assert result.exit_code == 0
-    assert "Usage:" in result.output
-    assert "--help" in result.output
+    assert "Usage:" in output
+    assert "--help" in output
 
 
 def test_version_matches_installed_package_metadata() -> None:
